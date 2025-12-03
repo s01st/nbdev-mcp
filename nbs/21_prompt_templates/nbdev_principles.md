@@ -1,0 +1,11 @@
+# nbdev Principles (concise)
+- Edit notebooks in `{nbs_path}/`, never generated `{lib}/` .py files.
+- `nbs/index.ipynb` → README.md; never edit README.md directly.
+- Do not define `__all__`; nbdev generates exports.
+- No relative imports; use absolute imports from `{lib}`.
+- One function or class per code cell; define helpers before they are used.
+- For submodules, `00__init__.ipynb` → `#| default_exp <sub>.__init__`.
+- Prefer pytest in `tests/`; use `nbs/99_tests/` only for fixtures/mocks.
+- Mark long examples with `#| eval: false`.
+- Split long narrative with `####` in separate markdown cells.
+- Use NumPy-style docstrings (Parameters, Returns, Raises, Examples).

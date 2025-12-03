@@ -1,0 +1,9 @@
+project:
+  output-dir: _docs
+
+website:
+  title: "nbdev-mcp"
+  site-url: "https://s01st.github.io/nbdev-mcp"
+  description: ""
+  repo-branch: main
+  repo-url: "https://github.com/s01st/nbdev-mcp"

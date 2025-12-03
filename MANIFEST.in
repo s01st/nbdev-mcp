@@ -1,0 +1,6 @@
+include settings.ini
+include LICENSE
+include CONTRIBUTING.md
+include README.md
+recursive-include nbdev_mcp/prompt_templates *.md
+recursive-exclude * __pycache__
