@@ -5,7 +5,7 @@
 # %% auto 0
 __all__ = []
 
-# %% ../../nbs/11_tools/00__init__.ipynb 4
+# %% ../../nbs/11_tools/00__init__.ipynb 5
 from .project import add_project_tools
 from .env import add_env_tools
 from .nbdev import add_nbdev_tools
