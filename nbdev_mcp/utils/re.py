@@ -168,8 +168,5 @@ PATTERN_CATALOG: Dict[str, re.Pattern] = {
 }
 '''Lookup of named regular expressions used across the MCP codebase.'''
 
-
-
-
 # %% ../../nbs/00_utils/05_re.ipynb 25
 #| export

@@ -110,5 +110,5 @@ def save_bookmarks(aliases: Dict[str, str]) -> None:
     BOOKMARKS_PATH.write_text(json.dumps({"aliases": aliases}, indent=2), encoding="utf-8")
 
 
-# %% ../../nbs/00_utils/04_config.ipynb 13
+# %% ../../nbs/00_utils/04_config.ipynb 11
 #| export

@@ -13,7 +13,6 @@ from nbdev_mcp.utils.re import (
     BARE_REF_PATTERN,
 )
 
-
 # %% auto 0
 __all__ = ['extract_references', 'refs_used', 'clear_section_buffer', 'group_lines_by_sections', 'readd_reference_links',
            'split_markdown_into_cells']
