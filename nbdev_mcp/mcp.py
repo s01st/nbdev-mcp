@@ -38,8 +38,8 @@ console = Console();  # semicolon suppresses notebook output
 __all__ = ['console', 'app', 'set_http_path_if_supported', 'create_nbdev_mcp', 'Transport', 'Provider', 'version_callback',
            'callback', 'get_claude_config_path', 'get_vscode_config_path', 'get_cursor_config_path',
            'get_codex_config_path', 'get_config_path', 'get_mcp_key', 'get_python_path', 'make_server_config',
-           'install_to_provider', 'uninstall_from_provider', 'check_provider_status', 'run', 'install', 'uninstall',
-           'status', 'main']
+           'make_server_config_for_provider', 'install_to_provider', 'uninstall_from_provider', 'check_provider_status',
+           'run', 'install', 'uninstall', 'status', 'main']
 
 # %% ../nbs/30_mcp.ipynb 6
 def set_http_path_if_supported(target_path: str) -> bool:
@@ -162,23 +162,23 @@ def get_claude_config_path() -> Path:
 
 
 def get_vscode_config_path() -> Path:
-    """Get VS Code MCP settings path."""
+    """Get VS Code MCP config path (mcp.json, not settings.json)."""
     if sys.platform == "darwin":
-        return Path.home() / "Library/Application Support/Code/User/settings.json"
+        return Path.home() / "Library/Application Support/Code/User/mcp.json"
     elif sys.platform == "win32":
-        return Path(os.environ.get("APPDATA", "")) / "Code/User/settings.json"
+        return Path(os.environ.get("APPDATA", "")) / "Code/User/mcp.json"
     else:
-        return Path.home() / ".config/Code/User/settings.json"
+        return Path.home() / ".config/Code/User/mcp.json"
 
 
 def get_cursor_config_path() -> Path:
-    """Get Cursor MCP settings path."""
+    """Get Cursor MCP config path."""
     if sys.platform == "darwin":
-        return Path.home() / "Library/Application Support/Cursor/User/settings.json"
+        return Path.home() / "Library/Application Support/Cursor/User/mcp.json"
     elif sys.platform == "win32":
-        return Path(os.environ.get("APPDATA", "")) / "Cursor/User/settings.json"
+        return Path(os.environ.get("APPDATA", "")) / "Cursor/User/mcp.json"
     else:
-        return Path.home() / ".config/Cursor/User/settings.json"
+        return Path.home() / ".config/Cursor/User/mcp.json"
 
 
 def get_codex_config_path() -> Path:
@@ -210,7 +210,7 @@ def get_mcp_key(provider: Provider) -> str:
         case Provider.claude | Provider.codex:
             return "mcpServers"
         case Provider.vscode | Provider.cursor:
-            return "mcp.servers"
+            return "servers"  # mcp.json uses "servers" not "mcpServers"
 
 
 def get_python_path() -> str:
@@ -224,6 +224,18 @@ def make_server_config() -> dict:
         "command": get_python_path(),
         "args": ["-m", "nbdev_mcp"]
     }
+
+
+def make_server_config_for_provider(provider: Provider) -> dict:
+    """Generate server configuration dict for a specific provider."""
+    base = {
+        "command": get_python_path(),
+        "args": ["-m", "nbdev_mcp"]
+    }
+    # VS Code/Cursor mcp.json format includes "type"
+    if provider in (Provider.vscode, Provider.cursor):
+        return {"type": "stdio", **base}
+    return base
 
 
 def _parse_jsonc(text: str) -> dict:
@@ -241,7 +253,7 @@ def _parse_jsonc(text: str) -> dict:
 def install_to_provider(provider: Provider, dry_run: bool = False) -> bool:
     """Install nbdev-mcp to a provider's config."""
     config_path = get_config_path(provider)
-    server_config = make_server_config()
+    server_config = make_server_config_for_provider(provider)
     mcp_key = get_mcp_key(provider)
     
     # Read existing or create new
