@@ -344,7 +344,7 @@ def validate_all_tutorials(
 ) -> Dict[str, Any]:
     """Validate all tutorial notebooks.
     
-    Looks for tutorials in tutorials/ directory.
+    Looks for tutorials in {project}/tutorials/ directory (NOT nbs/tutorials).
     
     Parameters
     ----------
@@ -362,23 +362,20 @@ def validate_all_tutorials(
     settings = settings_dict(p)
     lib_name = settings.get('lib_name', 'pkg')
     
-    # Find tutorials directory
-    tutorials_dir = p / 'tutorials'
-    if not tutorials_dir.exists():
-        nbs = nbs_dir(p)
-        tutorials_dir = nbs / 'tutorials'
+    # Tutorials are always at project root, not inside nbs/
+    tuts = p / 'tutorials'
     
-    if not tutorials_dir.exists():
+    if not tuts.exists():
         return {
             'ok': True,
-            'message': 'No tutorials directory found',
+            'message': 'No tutorials/ directory found (expected at project root)',
             'tutorials': []
         }
     
     all_issues = []
     tutorial_count = 0
     
-    for nb_path in tutorials_dir.glob('*.ipynb'):
+    for nb_path in tuts.glob('*.ipynb'):
         if nb_path.name.startswith('.'):
             continue
         
