@@ -226,16 +226,76 @@ def make_server_config() -> dict:
     }
 
 
-def make_server_config_for_provider(provider: Provider) -> dict:
+def make_server_config_for_provider(provider: Provider, auto_start: bool = False) -> dict:
     """Generate server configuration dict for a specific provider."""
     base = {
         "command": get_python_path(),
         "args": ["-m", "nbdev_mcp"]
     }
-    # VS Code/Cursor mcp.json format includes "type"
+    # VS Code/Cursor mcp.json format includes "type" and optional "autoStart"
     if provider in (Provider.vscode, Provider.cursor):
-        return {"type": "stdio", **base}
+        config = {"type": "stdio", **base}
+        if auto_start:
+            config["autoStart"] = True
+        return config
     return base
+
+
+def get_wrapper_script_path() -> Path:
+    """Get path for the keep-alive wrapper script."""
+    if sys.platform == "win32":
+        return Path.home() / ".nbdev-mcp" / "nbdev-mcp-wrapper.bat"
+    return Path.home() / ".nbdev-mcp" / "nbdev-mcp-wrapper.sh"
+
+
+def generate_wrapper_script() -> str:
+    """Generate a keep-alive wrapper script that monitors and restarts the MCP."""
+    python_path = get_python_path()
+    if sys.platform == "win32":
+        return f'''@echo off
+REM nbdev-mcp keep-alive wrapper
+:loop
+"{python_path}" -m nbdev_mcp %*
+echo MCP exited with code %ERRORLEVEL%, restarting in 2 seconds...
+timeout /t 2 /nobreak >nul
+goto loop
+'''
+    else:
+        return f'''#!/usr/bin/env bash
+# nbdev-mcp keep-alive wrapper
+# Monitors and restarts the MCP server if it exits
+
+PYTHON="{python_path}"
+RESTART_DELAY=2
+
+while true; do
+    echo "[nbdev-mcp] Starting server..."
+    "$PYTHON" -m nbdev_mcp "$@"
+    EXIT_CODE=$?
+    echo "[nbdev-mcp] Server exited with code $EXIT_CODE, restarting in ${{RESTART_DELAY}}s..."
+    sleep $RESTART_DELAY
+done
+'''
+
+
+def install_wrapper_script(dry_run: bool = False) -> Path:
+    """Install the keep-alive wrapper script."""
+    script_path = get_wrapper_script_path()
+    script_content = generate_wrapper_script()
+
+    if dry_run:
+        console.print(f"\n[bold cyan]Wrapper Script[/]")
+        console.print(f"[dim]File:[/] {script_path}")
+        console.print(f"\n[dim]Script content:[/]")
+        console.print(script_content)
+        return script_path
+
+    script_path.parent.mkdir(parents=True, exist_ok=True)
+    script_path.write_text(script_content)
+    if sys.platform != "win32":
+        script_path.chmod(0o755)
+    console.print(f"[green]✓[/] Wrapper script installed: {script_path}")
+    return script_path
 
 
 def _parse_jsonc(text: str) -> dict:
@@ -256,10 +316,10 @@ def _parse_jsonc(text: str) -> dict:
         return {}
 
 
-def install_to_provider(provider: Provider, dry_run: bool = False) -> bool:
+def install_to_provider(provider: Provider, dry_run: bool = False, auto_start: bool = False) -> bool:
     """Install nbdev-mcp to a provider's config."""
     config_path = get_config_path(provider)
-    server_config = make_server_config_for_provider(provider)
+    server_config = make_server_config_for_provider(provider, auto_start=auto_start)
     mcp_key = get_mcp_key(provider)
     
     # Read existing or create new
@@ -450,13 +510,22 @@ def install(
     dry_run: Annotated[bool, typer.Option(
         "-d", "--dry-run", help="Show exact config changes without writing."
     )] = False,
+    auto_start: Annotated[bool, typer.Option(
+        "-a", "--auto-start", help="Auto-start server when VS Code/Cursor opens."
+    )] = False,
+    wrapper: Annotated[bool, typer.Option(
+        "-w", "--wrapper", help="Install keep-alive wrapper script."
+    )] = False,
 ):
     """Install nbdev-mcp to MCP client(s)."""
     providers = [provider] if provider else list(Provider)
-    
+
     for p in providers:
-        install_to_provider(p, dry_run=dry_run)
-    
+        install_to_provider(p, dry_run=dry_run, auto_start=auto_start)
+
+    if wrapper:
+        install_wrapper_script(dry_run=dry_run)
+
     if not dry_run:
         console.print("\n[yellow]Restart your MCP client(s) to activate.[/]")
 
