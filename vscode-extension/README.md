@@ -25,6 +25,10 @@ VS Code extension for nbdev projects with MCP server integration.
 - **Analyze Exports**: See what a notebook exports
 - **Dependency Tree**: Visualize module dependencies
 - **Audit Module Index**: Check _modidx.py for issues
+- **Find Dead Exports**: Detect exported symbols never imported elsewhere
+- **Generate Dependency Notebook**: Create notebook with Mermaid diagram
+- **Generate API Documentation**: Auto-generate API reference notebook
+- **Analyze Remote Project**: Analyze GitHub repos without cloning
 
 ### Error Detection
 - **Scan Notebook Errors**: Find existing error outputs
@@ -96,6 +100,11 @@ All commands are prefixed with `nbdev:` in the command palette.
 | `nbdev: Run Tutorials` | Execute tutorials |
 | `nbdev: Find Source Notebook` | Find .py source |
 | `nbdev: Check if Generated` | Check if auto-generated |
+| `nbdev: Find Dead Exports` | Find unused exports |
+| `nbdev: Generate Dependency Notebook` | Create dependency graph notebook |
+| `nbdev: Generate API Documentation` | Generate API docs notebook |
+| `nbdev: Analyze Remote Project` | Analyze GitHub repo |
+| `nbdev: Show Server Metrics` | Show server health stats |
 
 ## Context Menu
 

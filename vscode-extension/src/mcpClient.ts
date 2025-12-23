@@ -121,6 +121,11 @@ except Exception as e:
             'find_source_notebook': 'find_source_notebook',
             'check_if_generated': 'check_if_generated',
             'notebook_diff': 'notebook_diff',
+            'lint_dead_exports': 'lint_dead_exports',
+            'dependency_notebook': 'dependency_notebook',
+            'generate_api_docs': 'generate_api_docs',
+            'analyze_remote': 'analyze_remote',
+            'server_metrics': 'server_metrics',
         };
         return moduleMap[toolName] || toolName;
     }

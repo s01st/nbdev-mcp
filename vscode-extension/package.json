@@ -104,6 +104,31 @@
         "command": "nbdev-mcp.checkIfGenerated",
         "title": "Check if File is Generated",
         "category": "nbdev"
+      },
+      {
+        "command": "nbdev-mcp.lintDeadExports",
+        "title": "Find Dead Exports",
+        "category": "nbdev"
+      },
+      {
+        "command": "nbdev-mcp.dependencyNotebook",
+        "title": "Generate Dependency Notebook",
+        "category": "nbdev"
+      },
+      {
+        "command": "nbdev-mcp.generateApiDocs",
+        "title": "Generate API Documentation",
+        "category": "nbdev"
+      },
+      {
+        "command": "nbdev-mcp.analyzeRemote",
+        "title": "Analyze Remote Project",
+        "category": "nbdev"
+      },
+      {
+        "command": "nbdev-mcp.serverMetrics",
+        "title": "Show Server Metrics",
+        "category": "nbdev"
       }
     ],
     "menus": {

@@ -326,6 +326,98 @@ export function registerCommands(
             }
         })
     );
+
+    // New analysis commands
+    context.subscriptions.push(
+        vscode.commands.registerCommand('nbdev-mcp.lintDeadExports', async () => {
+            await runWithProgress('Finding dead exports...', async () => {
+                const result = await client.callTool('lint_dead_exports', {});
+                if (result.ok) {
+                    const deadExports = result.dead_exports as Array<Record<string, unknown>> || [];
+                    if (deadExports.length === 0) {
+                        vscode.window.showInformationMessage('No dead exports found');
+                    } else {
+                        showOutputPanel('Dead Exports', formatDeadExports(deadExports));
+                    }
+                } else {
+                    vscode.window.showErrorMessage(`Analysis failed: ${result.error}`);
+                }
+            });
+        })
+    );
+
+    context.subscriptions.push(
+        vscode.commands.registerCommand('nbdev-mcp.dependencyNotebook', async () => {
+            await runWithProgress('Generating dependency notebook...', async () => {
+                const result = await client.callTool('dependency_notebook', {});
+                if (result.ok) {
+                    const notebookPath = result.notebook_path as string;
+                    const action = await vscode.window.showInformationMessage(
+                        `Dependency notebook created: ${notebookPath}`,
+                        'Open Notebook'
+                    );
+                    if (action === 'Open Notebook') {
+                        const uri = vscode.Uri.file(notebookPath);
+                        await vscode.window.showTextDocument(uri);
+                    }
+                } else {
+                    vscode.window.showErrorMessage(`Generation failed: ${result.error}`);
+                }
+            });
+        })
+    );
+
+    context.subscriptions.push(
+        vscode.commands.registerCommand('nbdev-mcp.generateApiDocs', async () => {
+            await runWithProgress('Generating API documentation...', async () => {
+                const result = await client.callTool('generate_api_docs', {});
+                if (result.ok) {
+                    const notebookPath = result.notebook_path as string;
+                    const action = await vscode.window.showInformationMessage(
+                        `API docs notebook created: ${notebookPath}`,
+                        'Open Notebook'
+                    );
+                    if (action === 'Open Notebook') {
+                        const uri = vscode.Uri.file(notebookPath);
+                        await vscode.window.showTextDocument(uri);
+                    }
+                } else {
+                    vscode.window.showErrorMessage(`Generation failed: ${result.error}`);
+                }
+            });
+        })
+    );
+
+    context.subscriptions.push(
+        vscode.commands.registerCommand('nbdev-mcp.analyzeRemote', async () => {
+            const url = await vscode.window.showInputBox({
+                prompt: 'Enter GitHub repository URL',
+                placeHolder: 'e.g., https://github.com/fastai/nbdev'
+            });
+
+            if (url) {
+                await runWithProgress(`Analyzing remote project...`, async () => {
+                    const result = await client.callTool('analyze_remote', { url });
+                    if (result.ok) {
+                        showOutputPanel('Remote Project Analysis', formatRemoteAnalysis(result));
+                    } else {
+                        vscode.window.showErrorMessage(`Analysis failed: ${result.error}`);
+                    }
+                });
+            }
+        })
+    );
+
+    context.subscriptions.push(
+        vscode.commands.registerCommand('nbdev-mcp.serverMetrics', async () => {
+            const result = await client.callTool('server_metrics', {});
+            if (result.ok) {
+                showOutputPanel('Server Metrics', formatServerMetrics(result));
+            } else {
+                vscode.window.showErrorMessage(`Failed to get metrics: ${result.error}`);
+            }
+        })
+    );
 }
 
 async function runWithProgress<T>(
@@ -411,6 +503,62 @@ function formatTutorialFailures(failures: Array<Record<string, unknown>>): strin
         lines.push(`Notebook: ${failure.notebook}`);
         lines.push(`Error: ${failure.error}`);
         lines.push('');
+    }
+
+    return lines.join('\n');
+}
+
+function formatDeadExports(deadExports: Array<Record<string, unknown>>): string {
+    const lines: string[] = [];
+    lines.push('Dead Exports (never imported):');
+    lines.push('');
+
+    for (const exp of deadExports) {
+        lines.push(`Symbol: ${exp.symbol}`);
+        lines.push(`  Notebook: ${exp.notebook}`);
+        lines.push(`  Module: ${exp.module}`);
+        lines.push('');
+    }
+
+    return lines.join('\n');
+}
+
+function formatRemoteAnalysis(result: Record<string, unknown>): string {
+    const lines: string[] = [];
+    lines.push(`Remote Project Analysis: ${result.url}`);
+    lines.push('');
+    lines.push(`Project Name: ${result.lib_name || 'unknown'}`);
+    lines.push(`Notebooks: ${result.notebook_count || 0}`);
+    lines.push(`Modules: ${result.module_count || 0}`);
+    lines.push('');
+
+    const notebooks = result.notebooks as string[] || [];
+    if (notebooks.length > 0) {
+        lines.push('Notebooks:');
+        for (const nb of notebooks) {
+            lines.push(`  - ${nb}`);
+        }
+    }
+
+    return lines.join('\n');
+}
+
+function formatServerMetrics(result: Record<string, unknown>): string {
+    const lines: string[] = [];
+    lines.push('Server Metrics');
+    lines.push('');
+    lines.push(`Uptime: ${result.uptime_seconds || 0}s`);
+    lines.push(`Memory Usage: ${result.memory_mb || 0} MB`);
+    lines.push(`CPU Percent: ${result.cpu_percent || 0}%`);
+    lines.push(`Total Requests: ${result.total_requests || 0}`);
+    lines.push('');
+
+    const toolCounts = result.tool_counts as Record<string, number> || {};
+    if (Object.keys(toolCounts).length > 0) {
+        lines.push('Tool Usage:');
+        for (const [tool, count] of Object.entries(toolCounts)) {
+            lines.push(`  ${tool}: ${count}`);
+        }
     }
 
     return lines.join('\n');

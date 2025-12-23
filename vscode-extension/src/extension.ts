@@ -79,7 +79,8 @@ async function runLintOnFile(filePath: string): Promise<void> {
     try {
         const result = await mcpClient.callTool('lint_rules', {});
         if (result.ok && result.issues) {
-            diagnostics.updateDiagnostics(result.issues);
+            const issues = result.issues as Array<Record<string, unknown>>;
+            diagnostics.updateDiagnostics(issues);
         }
     } catch (error) {
         console.error('Lint on save failed:', error);
