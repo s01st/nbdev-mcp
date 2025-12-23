@@ -32,13 +32,14 @@ from nbdev_mcp.tools import (
 from .prompts import add_prompts
 from .tasks import add_task_tools, enable_nbdev_tasks
 
-console = Console()
+console = Console();  # semicolon suppresses notebook output
 
 # %% auto 0
 __all__ = ['console', 'app', 'set_http_path_if_supported', 'create_nbdev_mcp', 'Transport', 'Provider', 'version_callback',
-           'callback', 'get_claude_config_path', 'get_vscode_config_path', 'get_cursor_config_path', 'get_config_path',
-           'get_python_path', 'make_server_config', 'install_to_provider', 'uninstall_from_provider',
-           'check_provider_status', 'run', 'install', 'uninstall', 'status', 'main']
+           'callback', 'get_claude_config_path', 'get_vscode_config_path', 'get_cursor_config_path',
+           'get_codex_config_path', 'get_config_path', 'get_mcp_key', 'get_python_path', 'make_server_config',
+           'install_to_provider', 'uninstall_from_provider', 'check_provider_status', 'run', 'install', 'uninstall',
+           'status', 'main']
 
 # %% ../nbs/30_mcp.ipynb 6
 def set_http_path_if_supported(target_path: str) -> bool:
@@ -104,6 +105,7 @@ class Provider(str, Enum):
     claude = "claude"
     vscode = "vscode"
     cursor = "cursor"
+    codex = "codex"
 
 
 app = typer.Typer(
@@ -113,7 +115,7 @@ app = typer.Typer(
     no_args_is_help=False,
     add_completion=True,
     context_settings={"help_option_names": ["-h", "--help"]},
-)
+);  # semicolon suppresses notebook output
 
 
 def version_callback(value: bool):
@@ -129,7 +131,6 @@ def callback(
         "-V", "--version", callback=version_callback, is_eager=True,
         help="Show version and exit."
     )] = False,
-    # Default run options (when no subcommand given)
     project: Annotated[Optional[str], typer.Option(
         "-p", "--project", help="Path or alias for an nbdev project."
     )] = None,
@@ -180,6 +181,16 @@ def get_cursor_config_path() -> Path:
         return Path.home() / ".config/Cursor/User/settings.json"
 
 
+def get_codex_config_path() -> Path:
+    """Get Codex CLI config path."""
+    if sys.platform == "darwin":
+        return Path.home() / ".codex/config.json"
+    elif sys.platform == "win32":
+        return Path(os.environ.get("USERPROFILE", "")) / ".codex/config.json"
+    else:
+        return Path.home() / ".codex/config.json"
+
+
 def get_config_path(provider: Provider) -> Path:
     """Get config path for a provider."""
     match provider:
@@ -189,6 +200,17 @@ def get_config_path(provider: Provider) -> Path:
             return get_vscode_config_path()
         case Provider.cursor:
             return get_cursor_config_path()
+        case Provider.codex:
+            return get_codex_config_path()
+
+
+def get_mcp_key(provider: Provider) -> str:
+    """Get the MCP servers key for a provider's config."""
+    match provider:
+        case Provider.claude | Provider.codex:
+            return "mcpServers"
+        case Provider.vscode | Provider.cursor:
+            return "mcp.servers"
 
 
 def get_python_path() -> str:
@@ -207,11 +229,8 @@ def make_server_config() -> dict:
 def _parse_jsonc(text: str) -> dict:
     """Parse JSON with Comments (JSONC) - strips // and /* */ comments."""
     import re
-    # Remove single-line comments
     text = re.sub(r'//.*?$', '', text, flags=re.MULTILINE)
-    # Remove multi-line comments
     text = re.sub(r'/\*.*?\*/', '', text, flags=re.DOTALL)
-    # Remove trailing commas before } or ]
     text = re.sub(r',(\s*[}\]])', r'\1', text)
     try:
         return json.loads(text)
@@ -223,34 +242,33 @@ def install_to_provider(provider: Provider, dry_run: bool = False) -> bool:
     """Install nbdev-mcp to a provider's config."""
     config_path = get_config_path(provider)
     server_config = make_server_config()
+    mcp_key = get_mcp_key(provider)
     
-    if dry_run:
-        console.print(Panel.fit(
-            f"[dim]Provider:[/] {provider.value}\n"
-            f"[dim]Config:[/] {config_path}\n"
-            f"[dim]Python:[/] {server_config['command']}",
-            title="[yellow]Dry Run[/]",
-            border_style="yellow"
-        ))
-        return True
-    
-    # Read or create config
+    # Read existing or create new
     if config_path.exists():
         config = _parse_jsonc(config_path.read_text())
+        existed = True
     else:
-        config_path.parent.mkdir(parents=True, exist_ok=True)
         config = {}
+        existed = False
     
-    # Provider-specific key
-    if provider == Provider.claude:
-        if "mcpServers" not in config:
-            config["mcpServers"] = {}
-        config["mcpServers"]["nbdev"] = server_config
-    else:  # vscode, cursor use mcp.servers
-        if "mcp.servers" not in config:
-            config["mcp.servers"] = {}
-        config["mcp.servers"]["nbdev"] = server_config
+    # Build the change
+    if mcp_key not in config:
+        config[mcp_key] = {}
+    config[mcp_key]["nbdev"] = server_config
     
+    if dry_run:
+        console.print(f"\n[bold cyan]{provider.value.title()}[/]")
+        console.print(f"[dim]File:[/] {config_path}")
+        if existed:
+            console.print(f"[dim]Action:[/] Update existing config")
+        else:
+            console.print(f"[dim]Action:[/] Create new config file")
+        console.print(f"\n[dim]Full config that would be written:[/]")
+        console.print_json(json.dumps(config, indent=2))
+        return True
+    
+    config_path.parent.mkdir(parents=True, exist_ok=True)
     config_path.write_text(json.dumps(config, indent=2))
     console.print(f"[green]✓[/] Installed to [bold]{provider.value}[/]: {config_path}")
     return True
@@ -259,6 +277,7 @@ def install_to_provider(provider: Provider, dry_run: bool = False) -> bool:
 def uninstall_from_provider(provider: Provider, dry_run: bool = False) -> bool:
     """Remove nbdev-mcp from a provider's config."""
     config_path = get_config_path(provider)
+    mcp_key = get_mcp_key(provider)
     
     if not config_path.exists():
         console.print(f"[yellow]⚠[/] {provider.value}: Config not found")
@@ -266,18 +285,21 @@ def uninstall_from_provider(provider: Provider, dry_run: bool = False) -> bool:
     
     config = _parse_jsonc(config_path.read_text())
     
-    # Provider-specific key
-    key = "mcpServers" if provider == Provider.claude else "mcp.servers"
-    
-    if key not in config or "nbdev" not in config.get(key, {}):
+    if mcp_key not in config or "nbdev" not in config.get(mcp_key, {}):
         console.print(f"[yellow]⚠[/] {provider.value}: nbdev-mcp not installed")
         return False
     
+    # Remove the entry
+    del config[mcp_key]["nbdev"]
+    
     if dry_run:
-        console.print(f"[yellow]Would remove[/] 'nbdev' from {provider.value}")
+        console.print(f"\n[bold cyan]{provider.value.title()}[/]")
+        console.print(f"[dim]File:[/] {config_path}")
+        console.print(f"[dim]Action:[/] Remove nbdev from {mcp_key}")
+        console.print(f"\n[dim]Config after removal:[/]")
+        console.print_json(json.dumps(config, indent=2))
         return True
     
-    del config[key]["nbdev"]
     config_path.write_text(json.dumps(config, indent=2))
     console.print(f"[green]✓[/] Removed from [bold]{provider.value}[/]")
     return True
@@ -286,6 +308,7 @@ def uninstall_from_provider(provider: Provider, dry_run: bool = False) -> bool:
 def check_provider_status(provider: Provider) -> dict:
     """Check installation status for a provider."""
     config_path = get_config_path(provider)
+    mcp_key = get_mcp_key(provider)
     
     if not config_path.exists():
         return {"provider": provider.value, "installed": False, "exists": False, "path": str(config_path)}
@@ -295,8 +318,7 @@ def check_provider_status(provider: Provider) -> dict:
     except Exception:
         return {"provider": provider.value, "installed": False, "exists": True, "path": str(config_path), "error": "parse error"}
     
-    key = "mcpServers" if provider == Provider.claude else "mcp.servers"
-    installed = key in config and "nbdev" in config.get(key, {})
+    installed = mcp_key in config and "nbdev" in config.get(mcp_key, {})
     
     return {"provider": provider.value, "installed": installed, "exists": True, "path": str(config_path)}
 
@@ -405,10 +427,10 @@ def run(
 @app.command()
 def install(
     provider: Annotated[Optional[Provider], typer.Argument(
-        help="Provider to install to (claude, vscode, cursor). Omit for all."
+        help="Provider: claude, vscode, cursor, codex. Omit for all."
     )] = None,
     dry_run: Annotated[bool, typer.Option(
-        "-n", "--dry-run", help="Show what would be done."
+        "-d", "--dry-run", help="Show exact config changes without writing."
     )] = False,
 ):
     """Install nbdev-mcp to MCP client(s)."""
@@ -424,10 +446,10 @@ def install(
 @app.command()
 def uninstall(
     provider: Annotated[Optional[Provider], typer.Argument(
-        help="Provider to uninstall from. Omit for all."
+        help="Provider: claude, vscode, cursor, codex. Omit for all."
     )] = None,
     dry_run: Annotated[bool, typer.Option(
-        "-n", "--dry-run", help="Show what would be done."
+        "-d", "--dry-run", help="Show exact config changes without writing."
     )] = False,
 ):
     """Remove nbdev-mcp from MCP client(s)."""
@@ -448,12 +470,12 @@ def status():
     for provider in Provider:
         info = check_provider_status(provider)
         if not info["exists"]:
-            status = "[dim]Config not found[/]"
+            st = "[dim]Config not found[/]"
         elif info["installed"]:
-            status = "[green]✓ Installed[/]"
+            st = "[green]✓ Installed[/]"
         else:
-            status = "[yellow]Not configured[/]"
-        table.add_row(provider.value.title(), status, info["path"])
+            st = "[yellow]Not configured[/]"
+        table.add_row(provider.value.title(), st, info["path"])
     
     table.add_row("", "", "")
     table.add_row("Python", f"[green]v{sys.version.split()[0]}[/]", get_python_path())
