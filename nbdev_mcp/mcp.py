@@ -241,9 +241,15 @@ def make_server_config_for_provider(provider: Provider) -> dict:
 def _parse_jsonc(text: str) -> dict:
     """Parse JSON with Comments (JSONC) - strips // and /* */ comments."""
     import re
-    text = re.sub(r'//.*?$', '', text, flags=re.MULTILINE)
-    text = re.sub(r'/\*.*?\*/', '', text, flags=re.DOTALL)
-    text = re.sub(r',(\s*[}\]])', r'\1', text)
+    # Try standard JSON first
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+    # Strip JSONC comments and trailing commas
+    text = re.sub(r'//[^\n]*', '', text)  # single-line comments
+    text = re.sub(r'/\*.*?\*/', '', text, flags=re.DOTALL)  # multi-line comments
+    text = re.sub(r',(\s*[}\]])', r'\1', text)  # trailing commas
     try:
         return json.loads(text)
     except json.JSONDecodeError:
