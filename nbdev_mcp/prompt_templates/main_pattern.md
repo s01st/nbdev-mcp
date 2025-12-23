@@ -15,9 +15,9 @@ if __name__ == "__main__":
 - Cell: `#| default_exp pkg.__main__`
 - Export a tiny wrapper that imports and calls your real `main`.
 
-3) Export directly to _main__:
+3) Export directly to __main__:
 ```python
-#| export _main__
+#| export __main__
 #| eval: False
 if __name__ == "__main__":
     import sys

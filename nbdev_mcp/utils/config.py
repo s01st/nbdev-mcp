@@ -10,12 +10,27 @@ from pathlib import Path
 from types import SimpleNamespace
 
 # %% auto 0
-__all__ = ['DEFAULT_CONFIG', 'NBMCP_CONFIG', 'CURRENT_PROJECT', 'BOOKMARKS_PATH', 'DotConfig', 'configure', 'get_config',
-           'get_current_project', 'set_current_project', 'find_config_dir', 'load_bookmarks', 'save_bookmarks']
+__all__ = ['DEFAULT_CONFIG', 'NBMCP_CONFIG', 'CURRENT_PROJECT', 'BOOKMARKS_PATH', 'EXPECTED_PROMPT_TEMPLATES', 'DotConfig',
+           'configure', 'get_config', 'get_current_project', 'set_current_project', 'find_config_dir', 'load_bookmarks',
+           'save_bookmarks']
 
 # %% ../../nbs/00_utils/04_config.ipynb 6
 class DotConfig(dict):
-    '''Dot-accessible configuration with dictionary semantics.'''
+    '''Dot-accessible configuration with dictionary semantics.
+    
+    A dictionary subclass that allows attribute-style access to keys.
+    Useful for configuration objects where ``config.key`` is more
+    readable than ``config['key']``.
+    
+    Examples
+    --------
+    >>> cfg = DotConfig({'debug': True})
+    >>> cfg.debug
+    True
+    >>> cfg.new_key = 'value'
+    >>> cfg['new_key']
+    'value'
+    '''
     def __getattr__(self, key: str):
         try:
             return self[key]
@@ -26,11 +41,22 @@ class DotConfig(dict):
         self[key] = value
 
     def copy(self) -> "DotConfig":
-        '''Return a shallow copy as another DotConfig.'''
+        '''Return a shallow copy as another DotConfig.
+        
+        Returns
+        -------
+        DotConfig
+            A new DotConfig instance with the same key-value pairs.
+        '''
         return DotConfig(self)
 
     def update_from_env(self) -> None:
-        '''Refresh config from environment variables if present.'''
+        '''Refresh config from environment variables if present.
+        
+        Updates log_level, prompt_dir, and env_dir_name from
+        NBMCP_LOG_LEVEL, NBMCP_PROMPT_DIR, and NBMCP_ENV_DIR
+        environment variables respectively.
+        '''
         self.log_level = os.environ.get("NBMCP_LOG_LEVEL", self.log_level)
         self.prompt_dir = os.environ.get("NBMCP_PROMPT_DIR", self.prompt_dir)
         self.env_dir_name = os.environ.get("NBMCP_ENV_DIR", self.env_dir_name)
@@ -50,27 +76,68 @@ NBMCP_CONFIG = DEFAULT_CONFIG
 CURRENT_PROJECT: Optional[Path] = None
 '''Currently selected nbdev project; ``None`` until explicitly set.'''
 
+
 # %% ../../nbs/00_utils/04_config.ipynb 7
 def configure(**kwargs: Any) -> DotConfig:
-    '''Update the global NBMCP_CONFIG in-place and return it.'''
+    '''Update the global NBMCP_CONFIG in-place and return it.
+    
+    Parameters
+    ----------
+    **kwargs : Any
+        Key-value pairs to merge into the global config.
+    
+    Returns
+    -------
+    DotConfig
+        The updated global configuration object.
+    '''
     NBMCP_CONFIG.update(kwargs)
     return NBMCP_CONFIG
 
 
 def get_config() -> DotConfig:
-    '''Return the global config object (mutable, dot-accessible).'''
+    '''Return the global config object (mutable, dot-accessible).
+    
+    Returns
+    -------
+    DotConfig
+        The global NBMCP_CONFIG instance.
+    '''
     return NBMCP_CONFIG
 
 
 def get_current_project() -> Optional[Path]:
-    '''Return the currently active project path (if any).'''
+    '''Return the currently active project path (if any).
+    
+    Returns
+    -------
+    Path or None
+        The current project path, or None if not set.
+    '''
     return CURRENT_PROJECT
 
 
 def set_current_project(path: Optional[Path]) -> None:
-    '''Set the active project path used by tools/resources.'''
+    '''Set the active project path used by tools/resources.
+    
+    Updates both config.CURRENT_PROJECT and paths.CURRENT_PROJECT
+    to ensure consistent state across all modules.
+    
+    Parameters
+    ----------
+    path : Path or None
+        The project path to set, or None to clear.
+    '''
     global CURRENT_PROJECT
     CURRENT_PROJECT = path
+    
+    # Also update paths module to keep in sync
+    # (paths imports CURRENT_PROJECT by value at load time)
+    try:
+        import nbdev_mcp.utils.paths as paths_module
+        paths_module.CURRENT_PROJECT = path
+    except ImportError:
+        pass  # paths not loaded yet, will pick up from config
 
 
 # %% ../../nbs/00_utils/04_config.ipynb 9
@@ -79,6 +146,11 @@ def find_config_dir() -> Path:
 
     On macOS/Linux it defaults to ``~/.config/mcp.nbdev``; on Windows it uses
     ``%APPDATA%/mcp.nbdev``. The directory is created if missing.
+    
+    Returns
+    -------
+    Path
+        The configuration directory path.
     '''
     if os.name == "nt":
         base = Path(os.environ.get("APPDATA", Path.home() / "AppData" / "Roaming"))
@@ -94,7 +166,13 @@ BOOKMARKS_PATH: Path = find_config_dir() / "projects.json"
 
 
 def load_bookmarks() -> Dict[str, str]:
-    '''Load saved project aliases from BOOKMARKS_PATH.'''
+    '''Load saved project aliases from BOOKMARKS_PATH.
+    
+    Returns
+    -------
+    Dict[str, str]
+        Mapping of alias names to project paths.
+    '''
     if BOOKMARKS_PATH.exists():
         try:
             data = json.loads(BOOKMARKS_PATH.read_text(encoding="utf-8"))
@@ -106,9 +184,33 @@ def load_bookmarks() -> Dict[str, str]:
 
 
 def save_bookmarks(aliases: Dict[str, str]) -> None:
-    '''Persist project aliases to BOOKMARKS_PATH.'''
+    '''Persist project aliases to BOOKMARKS_PATH.
+    
+    Parameters
+    ----------
+    aliases : Dict[str, str]
+        Mapping of alias names to project paths.
+    '''
     BOOKMARKS_PATH.write_text(json.dumps({"aliases": aliases}, indent=2), encoding="utf-8")
 
 
 # %% ../../nbs/00_utils/04_config.ipynb 11
+EXPECTED_PROMPT_TEMPLATES = (
+    'workflow_philosophy.md',
+    'nbdev_principles.md',
+    'documentation_best_practices.md',
+    'future_imports_guidance.md',
+    'nbdev_howto.md',
+    'documentation_guideline.md',
+    'module_scaffold.md',
+    'advanced_patterns.md',
+    'main_pattern.md',
+    'mcp_persistency.md',
+    'reuse_first_checklist.md',
+    'git_best_practices.md',
+    'python312_features.md',
+)
+'''Tuple of expected prompt template filenames under `nbs/21_prompt_templates/` which get bundled with `nbdev_mcp`.'''
+
+# %% ../../nbs/00_utils/04_config.ipynb 14
 #| export

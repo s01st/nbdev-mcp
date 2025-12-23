@@ -13,46 +13,79 @@ from nbdev_mcp.tools.lint import (
 class TestValidateInits:
     """Tests for validate_inits function."""
 
-    def test_validate_inits_no_project(self):
-        """validate_inits returns error with no project."""
+    def test_validate_inits_no_project(self, tmp_path):
+        """validate_inits returns error when cwd is not nbdev project."""
+        import os
         import nbdev_mcp.utils.config
+        import nbdev_mcp.utils.paths
+
         old_project = nbdev_mcp.utils.config.CURRENT_PROJECT
+        old_paths_project = nbdev_mcp.utils.paths.CURRENT_PROJECT
+        original_cwd = os.getcwd()
+
         nbdev_mcp.utils.config.CURRENT_PROJECT = None
+        nbdev_mcp.utils.paths.CURRENT_PROJECT = None
+
         try:
+            os.chdir(tmp_path)
             result = validate_inits()
             assert result['ok'] is False
         finally:
+            os.chdir(original_cwd)
             nbdev_mcp.utils.config.CURRENT_PROJECT = old_project
+            nbdev_mcp.utils.paths.CURRENT_PROJECT = old_paths_project
 
 
 class TestLintRules:
     """Tests for lint_rules function."""
 
-    def test_lint_rules_no_project(self):
-        """lint_rules returns error with no project."""
+    def test_lint_rules_no_project(self, tmp_path):
+        """lint_rules returns error when cwd is not nbdev project."""
+        import os
         import nbdev_mcp.utils.config
+        import nbdev_mcp.utils.paths
+
         old_project = nbdev_mcp.utils.config.CURRENT_PROJECT
+        old_paths_project = nbdev_mcp.utils.paths.CURRENT_PROJECT
+        original_cwd = os.getcwd()
+
         nbdev_mcp.utils.config.CURRENT_PROJECT = None
+        nbdev_mcp.utils.paths.CURRENT_PROJECT = None
+
         try:
+            os.chdir(tmp_path)
             result = lint_rules()
             assert result['ok'] is False
         finally:
+            os.chdir(original_cwd)
             nbdev_mcp.utils.config.CURRENT_PROJECT = old_project
+            nbdev_mcp.utils.paths.CURRENT_PROJECT = old_paths_project
 
 
 class TestLintMainGuards:
     """Tests for lint_main_guards function."""
 
-    def test_lint_main_guards_no_project(self):
-        """lint_main_guards returns error with no project."""
+    def test_lint_main_guards_no_project(self, tmp_path):
+        """lint_main_guards returns error when cwd is not nbdev project."""
+        import os
         import nbdev_mcp.utils.config
+        import nbdev_mcp.utils.paths
+
         old_project = nbdev_mcp.utils.config.CURRENT_PROJECT
+        old_paths_project = nbdev_mcp.utils.paths.CURRENT_PROJECT
+        original_cwd = os.getcwd()
+
         nbdev_mcp.utils.config.CURRENT_PROJECT = None
+        nbdev_mcp.utils.paths.CURRENT_PROJECT = None
+
         try:
+            os.chdir(tmp_path)
             result = lint_main_guards()
             assert result['ok'] is False
         finally:
+            os.chdir(original_cwd)
             nbdev_mcp.utils.config.CURRENT_PROJECT = old_project
+            nbdev_mcp.utils.paths.CURRENT_PROJECT = old_paths_project
 
 
 class TestLintToolsIntegration:

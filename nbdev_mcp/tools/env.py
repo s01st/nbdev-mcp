@@ -11,6 +11,7 @@ from pathlib import Path
 
 from rich.panel import Panel
 from mcp.server.fastmcp import FastMCP
+from mcp.types import ToolAnnotations
 
 from ..utils.paths import expand, discover_env_name, env_file, resolve_selector
 from ..utils.subprocess import which, run
@@ -106,13 +107,29 @@ def export_env(
     return {**logs, **meta, 'pretty': pretty}
 
 # %% ../../nbs/11_tools/02_env.ipynb 9
+# Tool annotation definitions for environment tools
+_ENV_TOOL_ANNOTATIONS = {
+    'ensure_env': ToolAnnotations(
+        title="Ensure Environment",
+        readOnlyHint=False,
+        idempotentHint=True,
+        openWorldHint=False
+    ),
+    'export_env': ToolAnnotations(
+        title="Export Environment",
+        readOnlyHint=False,
+        idempotentHint=True,
+        openWorldHint=False
+    ),
+}
+
 def add_env_tools(mcp: FastMCP) -> None:
-    """Attach environment management tools to the MCP server.
+    """Attach environment management tools to the MCP server with annotations.
     
     Parameters
     ----------
     mcp : FastMCP
         The MCP server instance.
     """
-    mcp.add_tool(ensure_env)
-    mcp.add_tool(export_env)
+    mcp.add_tool(ensure_env, annotations=_ENV_TOOL_ANNOTATIONS['ensure_env'])
+    mcp.add_tool(export_env, annotations=_ENV_TOOL_ANNOTATIONS['export_env'])

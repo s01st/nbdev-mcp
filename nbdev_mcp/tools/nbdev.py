@@ -7,13 +7,14 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 
 from mcp.server.fastmcp import FastMCP
+from mcp.types import ToolAnnotations
 
 from ..utils.paths import project_summary, resolve_selector
 from ..utils.subprocess import run, wrap_with_env
 from ..utils.rich import render_result
 
 # %% auto 0
-__all__ = ['nbdev_prepare', 'nbdev_export', 'nbdev_test', 'pytest_run', 'add_nbdev_tools']
+__all__ = ['NBDEV_TOOL_ANNOTATIONS', 'nbdev_prepare', 'nbdev_export', 'nbdev_test', 'pytest_run', 'add_nbdev_tools']
 
 # %% ../../nbs/11_tools/03_nbdev.ipynb 6
 def nbdev_prepare(
@@ -177,15 +178,43 @@ def pytest_run(
     return {**logs, 'project': str(p), 'pretty': pretty}
 
 # %% ../../nbs/11_tools/03_nbdev.ipynb 11
+# Tool annotation definitions for nbdev build tools
+NBDEV_TOOL_ANNOTATIONS = {
+    'nbdev_prepare': ToolAnnotations(
+        title="NBDev Prepare",
+        readOnlyHint=False,
+        idempotentHint=False,
+        openWorldHint=False
+    ),
+    'nbdev_export': ToolAnnotations(
+        title="NBDev Export",
+        readOnlyHint=False,
+        idempotentHint=True,
+        openWorldHint=False
+    ),
+    'nbdev_test': ToolAnnotations(
+        title="NBDev Test",
+        readOnlyHint=True,
+        idempotentHint=True,
+        openWorldHint=False
+    ),
+    'pytest_run': ToolAnnotations(
+        title="Pytest Run",
+        readOnlyHint=True,
+        idempotentHint=True,
+        openWorldHint=False
+    ),
+}
+
 def add_nbdev_tools(mcp: FastMCP) -> None:
-    """Attach nbdev build/test tools to the MCP server.
+    """Attach nbdev build/test tools to the MCP server with annotations.
     
     Parameters
     ----------
     mcp : FastMCP
         The MCP server instance.
     """
-    mcp.add_tool(nbdev_prepare)
-    mcp.add_tool(nbdev_export)
-    mcp.add_tool(nbdev_test)
-    mcp.add_tool(pytest_run)
+    mcp.add_tool(nbdev_prepare, annotations=NBDEV_TOOL_ANNOTATIONS['nbdev_prepare'])
+    mcp.add_tool(nbdev_export, annotations=NBDEV_TOOL_ANNOTATIONS['nbdev_export'])
+    mcp.add_tool(nbdev_test, annotations=NBDEV_TOOL_ANNOTATIONS['nbdev_test'])
+    mcp.add_tool(pytest_run, annotations=NBDEV_TOOL_ANNOTATIONS['pytest_run'])

@@ -11,8 +11,9 @@ from pathlib import Path
 from configparser import ConfigParser
 
 from mcp.server.fastmcp import FastMCP
+from mcp.types import ToolAnnotations
 
-from ..utils.config import CURRENT_PROJECT, load_bookmarks, save_bookmarks
+from ..utils.config import load_bookmarks, save_bookmarks
 from nbdev_mcp.utils.paths import (
     expand, project_summary, is_nbdev_project, resolve_selector,
 )
@@ -20,8 +21,9 @@ from ..utils.paths import require_project
 from ..utils.rich import render_result, render_table
 
 # %% auto 0
-__all__ = ['set_project', 'current_project', 'console_scripts_status', 'find_projects', 'bookmark_project', 'list_bookmarks',
-           'remove_bookmark', 'config_status', 'prompt_templates_status', 'add_project_tools']
+__all__ = ['TOOL_ANNOTATIONS', 'set_project', 'current_project', 'console_scripts_status', 'find_projects', 'bookmark_project',
+           'list_bookmarks', 'remove_bookmark', 'config_status', 'prompt_templates_status', 'health_check',
+           'add_project_tools']
 
 # %% ../../nbs/11_tools/01_project.ipynb 6
 def set_project(selector: str) -> Dict[str, Any]:
@@ -33,14 +35,14 @@ def set_project(selector: str) -> Dict[str, Any]:
     Returns:
         Result dict with 'ok', 'project' info, and 'pretty' formatted output.
     """
-    global CURRENT_PROJECT
     try:
         p = resolve_selector(selector)
     except Exception as e:
         return {'ok': False, 'error': str(e)}
     
-    import nbdev_mcp.utils.config
-    nbdev_mcp.utils.config.CURRENT_PROJECT = p
+    # Use set_current_project to update both config and paths modules
+    from nbdev_mcp.utils.config import set_current_project
+    set_current_project(p)
     
     meta = project_summary(p)
     pretty = render_result('Project selected', meta)
@@ -242,24 +244,14 @@ def prompt_templates_status() -> Dict[str, Any]:
     Returns:
         Result dict with 'templates' list and 'prompt_dir' setting.
     """
-    from nbdev_mcp.utils.config import get_config
+    from nbdev_mcp.utils.config import get_config, EXPECTED_PROMPT_TEMPLATES
     from nbdev_mcp.prompts import get_bundled_template
 
     cfg = get_config()
     prompt_dir = cfg.get('prompt_dir', 'prompt_templates')
 
     # List of expected templates
-    template_names = [
-        'workflow_philosophy.md',
-        'nbdev_principles.md',
-        'documentation_best_practices.md',
-        'future_imports_guidance.md',
-        'nbdev_howto.md',
-        'documentation_guideline.md',
-        'module_scaffold.md',
-        'advanced_patterns.md',
-        'main_pattern.md',
-    ]
+    template_names = EXPECTED_PROMPT_TEMPLATES
 
     templates = []
     for name in template_names:
@@ -289,19 +281,151 @@ def prompt_templates_status() -> Dict[str, Any]:
         'pretty': pretty
     }
 
-# %% ../../nbs/11_tools/01_project.ipynb 18
+# %% ../../nbs/11_tools/01_project.ipynb 17
+def health_check() -> Dict[str, Any]:
+    """Tool: Validate MCP connection and report system status.
+    
+    Returns status of:
+    - MCP server connection
+    - Current project (if any)
+    - Key dependencies
+    - Available tools count
+    
+    Returns
+    -------
+    Dict[str, Any]
+        Result with health status, version info, and diagnostics.
+    """
+    import sys
+    import platform
+    
+    # Check package versions
+    deps = {}
+    for pkg in ['nbdev', 'mcp', 'fastcore', 'rich']:
+        try:
+            from importlib.metadata import version as pkg_version
+            deps[pkg] = pkg_version(pkg)
+        except Exception:
+            deps[pkg] = 'not installed'
+    
+    # Get nbdev-mcp version
+    try:
+        from importlib.metadata import version as pkg_version
+        nbdev_mcp_version = pkg_version('nbdev-mcp')
+    except Exception:
+        nbdev_mcp_version = 'unknown'
+    
+    # Check current project
+    from nbdev_mcp.utils.config import CURRENT_PROJECT
+    project_status = {
+        'has_project': CURRENT_PROJECT is not None,
+        'path': str(CURRENT_PROJECT) if CURRENT_PROJECT else None
+    }
+    
+    # Build health report
+    health = {
+        'status': 'healthy',
+        'version': nbdev_mcp_version,
+        'python': sys.version.split()[0],
+        'platform': platform.system(),
+        'dependencies': deps,
+        'project': project_status,
+    }
+    
+    # Check for issues
+    issues = []
+    if deps.get('nbdev') == 'not installed':
+        issues.append('nbdev is not installed')
+        health['status'] = 'degraded'
+    if deps.get('mcp') == 'not installed':
+        issues.append('mcp is not installed')
+        health['status'] = 'error'
+    
+    if issues:
+        health['issues'] = issues
+    
+    from nbdev_mcp.utils.rich import render_result
+    pretty = render_result('Health Check', health)
+    return {'ok': health['status'] != 'error', **health, 'pretty': pretty}
+
+# %% ../../nbs/11_tools/01_project.ipynb 19
+# Tool annotation definitions for project tools
+TOOL_ANNOTATIONS = {
+    'set_project': ToolAnnotations(
+        title="Set Project",
+        readOnlyHint=False,
+        idempotentHint=True,
+        openWorldHint=False
+    ),
+    'current_project': ToolAnnotations(
+        title="Current Project",
+        readOnlyHint=True,
+        idempotentHint=True,
+        openWorldHint=False
+    ),
+    'console_scripts_status': ToolAnnotations(
+        title="Console Scripts Status",
+        readOnlyHint=True,
+        idempotentHint=True,
+        openWorldHint=False
+    ),
+    'find_projects': ToolAnnotations(
+        title="Find Projects",
+        readOnlyHint=True,
+        idempotentHint=True,
+        openWorldHint=True
+    ),
+    'bookmark_project': ToolAnnotations(
+        title="Bookmark Project",
+        readOnlyHint=False,
+        idempotentHint=True,
+        openWorldHint=False
+    ),
+    'list_bookmarks': ToolAnnotations(
+        title="List Bookmarks",
+        readOnlyHint=True,
+        idempotentHint=True,
+        openWorldHint=False
+    ),
+    'remove_bookmark': ToolAnnotations(
+        title="Remove Bookmark",
+        readOnlyHint=False,
+        idempotentHint=True,
+        openWorldHint=False
+    ),
+    'config_status': ToolAnnotations(
+        title="Config Status",
+        readOnlyHint=True,
+        idempotentHint=True,
+        openWorldHint=False
+    ),
+    'prompt_templates_status': ToolAnnotations(
+        title="Prompt Templates Status",
+        readOnlyHint=True,
+        idempotentHint=True,
+        openWorldHint=False
+    ),
+    'health_check': ToolAnnotations(
+        title="Health Check",
+        readOnlyHint=True,
+        idempotentHint=True,
+        openWorldHint=False
+    ),
+}
+
 def add_project_tools(mcp: FastMCP) -> None:
-    """Attach project management tools to the MCP server.
+    """Attach project management tools to the MCP server with annotations.
     
     Args:
         mcp: The FastMCP server instance to register tools with.
     """
-    mcp.add_tool(set_project)
-    mcp.add_tool(current_project)
-    mcp.add_tool(console_scripts_status)
-    mcp.add_tool(find_projects)
-    mcp.add_tool(bookmark_project)
-    mcp.add_tool(list_bookmarks)
-    mcp.add_tool(remove_bookmark)
-    mcp.add_tool(config_status)
-    mcp.add_tool(prompt_templates_status)
+    mcp.add_tool(set_project, annotations=TOOL_ANNOTATIONS['set_project'])
+    mcp.add_tool(current_project, annotations=TOOL_ANNOTATIONS['current_project'])
+    mcp.add_tool(console_scripts_status, annotations=TOOL_ANNOTATIONS['console_scripts_status'])
+    mcp.add_tool(find_projects, annotations=TOOL_ANNOTATIONS['find_projects'])
+    mcp.add_tool(bookmark_project, annotations=TOOL_ANNOTATIONS['bookmark_project'])
+    mcp.add_tool(list_bookmarks, annotations=TOOL_ANNOTATIONS['list_bookmarks'])
+    mcp.add_tool(remove_bookmark, annotations=TOOL_ANNOTATIONS['remove_bookmark'])
+    mcp.add_tool(config_status, annotations=TOOL_ANNOTATIONS['config_status'])
+    mcp.add_tool(prompt_templates_status, annotations=TOOL_ANNOTATIONS['prompt_templates_status'])
+    mcp.add_tool(health_check, annotations=TOOL_ANNOTATIONS['health_check'])

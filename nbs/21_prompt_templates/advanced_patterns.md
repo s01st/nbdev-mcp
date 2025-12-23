@@ -4,7 +4,7 @@
 - 🚫 Do not define `__all__` anywhere. nbdev builds exports automatically.
 
 ## Package Structure
-- Top-level init: `nbs/00__init__.ipynb` → `#| default_exp _init__`
+- Top-level init: `nbs/00__init__.ipynb` → `#| default_exp __init__`
 - Subpackage init: `nbs/<pkg>/00__init__.ipynb` → `#| default_exp <pkg>.__init__`
 - Submodules: use dotted `default_exp` (e.g., `core.data`) to create directories.
 

@@ -15,23 +15,45 @@ from .utils.paths import require_project, project_summary, nbs_dir, settings_dic
 
 # %% auto 0
 __all__ = ['resource_project_summary', 'resource_projects', 'resource_tree', 'resource_settings', 'resource_env_file',
-           'resource_read_file', 'resource_index_to_readme_note', 'resource_learning_links', 'add_resources']
+           'resource_read_file', 'resource_roadmap', 'resource_index_to_readme_note', 'resource_learning_links',
+           'resource_version', 'resource_heartbeat', 'add_resources']
 
 # %% ../nbs/10_resources.ipynb 6
 def resource_project_summary() -> str:
-    """Resource: JSON summary of the current project."""
+    """Resource: JSON summary of the current project.
+    
+    Returns
+    -------
+    str
+        JSON string with lib_name, nbs_path, notebooks count, and other project metadata.
+    """
     p = require_project()
     return json.dumps(project_summary(p), indent=2)
 
+
 # %% ../nbs/10_resources.ipynb 7
 def resource_projects() -> str:
-    """Resource: JSON of saved project bookmarks and NBDEV_PROJECTS env variable."""
+    """Resource: JSON of saved project bookmarks and NBDEV_PROJECTS env variable.
+    
+    Returns
+    -------
+    str
+        JSON string with 'bookmarks' dict and 'NBDEV_PROJECTS' env value.
+    """
     data = {'bookmarks': load_bookmarks(), 'NBDEV_PROJECTS': os.environ.get('NBDEV_PROJECTS', '')}
     return json.dumps(data, indent=2)
 
+
 # %% ../nbs/10_resources.ipynb 8
 def resource_tree() -> str:
-    """Resource: JSON listing of notebooks in the current project (limited to 600 files)."""
+    """Resource: JSON listing of notebooks in the current project.
+    
+    Returns
+    -------
+    str
+        JSON string with 'root', 'nbs_dir', 'notebooks' list (max 600),
+        'has_settings_ini', and 'has_readme' flags.
+    """
     p = require_project()
     nbs = nbs_dir(p)
     files: List[str] = []
@@ -44,16 +66,31 @@ def resource_tree() -> str:
     payload = {'root': str(p), 'nbs_dir': str(nbs), 'notebooks': files[:600], 'has_settings_ini': (p / 'settings.ini').exists(), 'has_readme': (p / 'README.md').exists()}
     return json.dumps(payload, indent=2)
 
+
 # %% ../nbs/10_resources.ipynb 9
 def resource_settings() -> str:
-    """Resource: contents of the current project's settings.ini file (text)."""
+    """Resource: contents of the current project's settings.ini file.
+    
+    Returns
+    -------
+    str
+        The settings.ini file contents, or an error message if not found.
+    """
     p = require_project()
     f = p / 'settings.ini'
     return f.read_text(encoding='utf-8') if f.exists() else 'No settings.ini found.'
 
+
 # %% ../nbs/10_resources.ipynb 10
 def resource_env_file() -> str:
-    """Resource: contents of the current project's environment YAML file (text)."""
+    """Resource: contents of the current project's environment YAML file.
+    
+    Returns
+    -------
+    str
+        The env YAML file contents (environment.yml or env.yml),
+        or an error message if not found.
+    """
     p = require_project()
     ef = env_file(p)
     return ef.read_text(encoding='utf-8') if ef.exists() else f'No env file at {ef}'
@@ -61,7 +98,18 @@ def resource_env_file() -> str:
 
 # %% ../nbs/10_resources.ipynb 11
 def resource_read_file(relpath: str) -> str:
-    """Resource: read a file by relative path within the current project (text content)."""
+    """Resource: read a file by relative path within the current project.
+    
+    Parameters
+    ----------
+    relpath : str
+        Relative path from project root to the file.
+    
+    Returns
+    -------
+    str
+        The file contents, or an error message if not found or outside project.
+    """
     p = require_project()
     f = (p / relpath).resolve()
     try:
@@ -75,20 +123,52 @@ def resource_read_file(relpath: str) -> str:
     except Exception as e:
         return f'Could not read {f}: {e}'
 
+
 # %% ../nbs/10_resources.ipynb 12
+def resource_roadmap() -> str:
+    """Resource: pointer to roadmap.ipynb if it exists.
+    
+    Searches for roadmap.ipynb in the project root or nbs/ directory.
+    
+    Returns
+    -------
+    str
+        JSON string with 'path' (relative path or None) and 'exists' flag.
+    """
+    p = require_project()
+    candidates = [p / "roadmap.ipynb", nbs_dir(p) / "roadmap.ipynb"]
+    for c in candidates:
+        if c.exists():
+            return json.dumps({"path": str(c.relative_to(p)), "exists": True}, indent=2)
+    return json.dumps({"path": None, "exists": False, "message": "roadmap.ipynb not found in project root or nbs/"}, indent=2)
+
+
+# %% ../nbs/10_resources.ipynb 13
 def resource_index_to_readme_note() -> str:
-    """Resource: JSON note explaining that nbs/index.ipynb becomes README.md in nbdev."""
+    """Resource: explains that nbs/index.ipynb becomes README.md in nbdev.
+    
+    Returns
+    -------
+    str
+        JSON string with 'lib' (library name) and 'message' explaining
+        the index.ipynb to README.md relationship.
+    """
     p = require_project()
     lib = settings_dict(p).get('lib_name') or '<your_lib>'
     msg = 'In nbdev, `nbs/index.ipynb` becomes `README.md` (the docs home page).'
     return json.dumps({'lib': lib, 'message': msg}, indent=2)
 
-# %% ../nbs/10_resources.ipynb 13
+
+# %% ../nbs/10_resources.ipynb 14
 def resource_learning_links() -> str:
     """Resource: curated links for nbdev, fastai, and related documentation.
     
-    Returns a JSON object with categorized links to official documentation,
-    tutorials, and community resources.
+    Returns
+    -------
+    str
+        JSON string with categorized links to official documentation,
+        tutorials, and community resources for nbdev, fastai, fastcore,
+        execnb, quarto, and MCP protocol.
     """
     payload = {
         "nbdev": {
@@ -121,7 +201,81 @@ def resource_learning_links() -> str:
     }
     return json.dumps(payload, indent=2)
 
-# %% ../nbs/10_resources.ipynb 14
+
+# %% ../nbs/10_resources.ipynb 15
+def resource_version() -> str:
+    """Resource: package version and Python version information.
+    
+    Returns
+    -------
+    str
+        JSON string with 'nbdev_mcp' version, 'python' version,
+        'platform', and 'dependencies' dict with nbdev, mcp, fastcore, rich.
+    """
+    import sys
+    import platform
+    
+    # Get package version
+    try:
+        from importlib.metadata import version as pkg_version
+        nbdev_mcp_version = pkg_version('nbdev-mcp')
+    except Exception:
+        nbdev_mcp_version = 'unknown'
+    
+    # Get dependency versions
+    deps = {}
+    for pkg in ['nbdev', 'mcp', 'fastcore', 'rich']:
+        try:
+            from importlib.metadata import version as pkg_version
+            deps[pkg] = pkg_version(pkg)
+        except Exception:
+            deps[pkg] = 'not installed'
+    
+    payload = {
+        'nbdev_mcp': nbdev_mcp_version,
+        'python': sys.version.split()[0],
+        'platform': platform.system(),
+        'dependencies': deps
+    }
+    return json.dumps(payload, indent=2)
+
+
+# %% ../nbs/10_resources.ipynb 16
+import time
+
+def resource_heartbeat() -> str:
+    """Resource: MCP heartbeat for persistency monitoring.
+    
+    Returns current timestamp and uptime info. If this resource
+    fails to respond, the MCP server is likely down and needs restart.
+    
+    Returns
+    -------
+    str
+        JSON string with 'status', 'timestamp', 'timestamp_iso',
+        'uptime_seconds', 'uptime_human', 'pid', and 'message'.
+    """
+    import os
+    
+    # Track server start time (approximate via module load time)
+    if not hasattr(resource_heartbeat, '_start_time'):
+        resource_heartbeat._start_time = time.time()
+    
+    uptime = time.time() - resource_heartbeat._start_time
+    
+    payload = {
+        'status': 'alive',
+        'timestamp': time.time(),
+        'timestamp_iso': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
+        'uptime_seconds': int(uptime),
+        'uptime_human': f'{int(uptime // 3600)}h {int((uptime % 3600) // 60)}m {int(uptime % 60)}s',
+        'pid': os.getpid(),
+        'message': 'nbdev-mcp server is running. If you cannot read this, restart the MCP server.'
+    }
+    return json.dumps(payload, indent=2)
+
+
+# %% ../nbs/10_resources.ipynb 17
 def add_resources(mcp: FastMCP) -> None:
     """Register all nbdev-mcp resources with the MCP server.
     
@@ -146,6 +300,11 @@ def add_resources(mcp: FastMCP) -> None:
         fn=resource_tree
     ))
     mcp.add_resource(FunctionResource(
+        uri="nbdev://roadmap", name="roadmap",
+        description="Pointer to roadmap.ipynb if it exists",
+        fn=resource_roadmap
+    ))
+    mcp.add_resource(FunctionResource(
         uri="nbdev://settings", name="settings",
         description="Contents of settings.ini",
         fn=resource_settings
@@ -165,7 +324,17 @@ def add_resources(mcp: FastMCP) -> None:
         description="Curated links for nbdev/fastai documentation",
         fn=resource_learning_links
     ))
+    mcp.add_resource(FunctionResource(
+        uri="nbdev://version", name="version",
+        description="Package version and dependency information",
+        fn=resource_version
+    ))
+    mcp.add_resource(FunctionResource(
+        uri="nbdev://heartbeat", name="heartbeat",
+        description="MCP heartbeat for persistency monitoring - check this to verify MCP is alive",
+        fn=resource_heartbeat
+    ))
 
-# %% ../nbs/10_resources.ipynb 16
+# %% ../nbs/10_resources.ipynb 19
 #| export
 

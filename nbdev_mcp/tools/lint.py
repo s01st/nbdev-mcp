@@ -5,22 +5,39 @@
 # %% ../../nbs/11_tools/05_lint.ipynb 4
 from __future__ import annotations
 from typing import Any, Dict, List, Optional
+from pathlib import Path
 
 import re
 
 from rich.panel import Panel
 from mcp.server.fastmcp import FastMCP
+from mcp.types import ToolAnnotations
 
-from ..utils.re import RELATIVE_IMPORT_PATTERN
+from nbdev_mcp.utils.re import (
+    RELATIVE_IMPORT_PATTERN,
+    DEFAULT_EXP_PATTERN,
+    ALL_DEFINITION_PATTERN,
+    EXPORT_DIRECTIVE_PATTERN,
+    FUNCTION_DEF_PATTERN,
+    CLASS_DEF_PATTERN,
+    MAIN_GUARD_PATTERN,
+    EXPORT_MAIN_PATTERN,
+)
 from nbdev_mcp.utils.paths import (
-    nbs_dir, settings_dict, resolve_selector, iter_notebooks,
+    nbs_dir, settings_dict, resolve_selector, with_project, iter_notebooks,
     read_nb, write_nb, abs_module_for_nb, resolve_relative,
 )
 from ..utils.nb import join_source, find_default_exp
 from ..utils.rich import render_table, render_panel
+from nbdev_mcp.utils.nbformat import (
+    read_notebook, write_notebook, has_standard_ending,
+    ensure_standard_ending, fix_header_formatting, standardize_notebook,
+)
 
 # %% auto 0
-__all__ = ['validate_inits', 'lint_rules', 'lint_main_guards', 'add_lint_tools']
+__all__ = ['LINT_TOOL_ANNOTATIONS', 'validate_inits', 'lint_rules', 'lint_main_guards', 'lint_imports', 'lint_types',
+           'auto_fix_lint', 'lint_notebook_structure', 'lint_private_attributes', 'lint_cell_complexity',
+           'lint_import_order', 'add_lint_tools']
 
 # %% ../../nbs/11_tools/05_lint.ipynb 6
 def validate_inits(
@@ -121,6 +138,7 @@ def lint_rules(
     - Manual __all__ definitions (not allowed)
     - Relative imports (should be absolute)
     - README.md being generated
+    - Duplicate exports across notebooks
     
     Parameters
     ----------
@@ -143,6 +161,9 @@ def lint_rules(
     lib = s.get('lib_name') or 'pkg'
     issues: List[Dict[str, Any]] = []
     changed = 0
+    
+    # Track exports for duplicate detection
+    export_locations: Dict[str, List[Dict[str, Any]]] = {}
     
     readme = p / 'README.md'
     if readme.exists():
@@ -174,6 +195,25 @@ def lint_rules(
                     'message': 'Never define __all__; nbdev auto-generates exports.'
                 })
             
+            # Track exports for duplicate detection
+            has_export = bool(re.search(r'#\|\s*export\s*$', src, re.MULTILINE))
+            if has_export:
+                # Extract function and class names
+                for m in re.finditer(r'^\s*def\s+(\w+)\s*\(', src, re.MULTILINE):
+                    name = m.group(1)
+                    export_locations.setdefault(name, []).append({
+                        'notebook': str(nb.relative_to(p)),
+                        'cell': i,
+                        'module': mod
+                    })
+                for m in re.finditer(r'^\s*class\s+(\w+)\s*[\(:]', src, re.MULTILINE):
+                    name = m.group(1)
+                    export_locations.setdefault(name, []).append({
+                        'notebook': str(nb.relative_to(p)),
+                        'cell': i,
+                        'module': mod
+                    })
+            
             # Check for relative imports
             new_lines: List[str] = []
             line_changed = False
@@ -204,9 +244,19 @@ def lint_rules(
             write_nb(nb, data)
             changed += 1
     
+    # Add duplicate export issues
+    for name, locs in export_locations.items():
+        if len(locs) > 1:
+            issues.append({
+                'rule': 'duplicate_export',
+                'symbol': name,
+                'locations': locs,
+                'message': f"Symbol '{name}' exported in multiple notebooks: {', '.join(loc['notebook'] for loc in locs)}"
+            })
+    
     rows = []
     for it in issues[:200]:
-        loc = it.get('file') or f"{it.get('notebook')}#cell{it.get('cell')}"
+        loc = it.get('file') or it.get('symbol') or f"{it.get('notebook')}#cell{it.get('cell')}"
         rows.append([it.get('rule', ''), str(loc), it.get('message', '')])
     pretty = render_table('lint issues', ['rule', 'location', 'msg'], rows)
     
@@ -214,6 +264,7 @@ def lint_rules(
         pretty += '\n' + render_panel('relative import fixes', f'Modified notebooks: {changed}')
     
     return {'ok': True, 'issues': issues, 'modified': changed, 'pretty': pretty}
+
 
 # %% ../../nbs/11_tools/05_lint.ipynb 9
 def lint_main_guards(project: Optional[str] = None) -> Dict[str, Any]:
@@ -278,15 +329,693 @@ def lint_main_guards(project: Optional[str] = None) -> Dict[str, Any]:
     
     return {'ok': len(issues) == 0, 'issues': issues, 'pretty': pretty}
 
+# %% ../../nbs/11_tools/05_lint.ipynb 10
+import ast
+
+def lint_imports(
+    project: Optional[str] = None,
+    ignore_patterns: Optional[List[str]] = None
+) -> Dict[str, Any]:
+    """Check for unused imports in notebook cells.
+    
+    Analyzes each code cell to find imports that are never used within that cell.
+    Uses AST parsing for accurate detection.
+    
+    Parameters
+    ----------
+    project : str, optional
+        Project path or alias. Uses current project if not specified.
+    ignore_patterns : List[str], optional
+        List of import names to ignore (e.g., ['typing', 'annotations']).
+    
+    Returns
+    -------
+    Dict[str, Any]
+        Result with 'issues' list of unused imports per cell.
+    """
+    try:
+        p = resolve_selector(project)
+    except Exception as e:
+        return {'ok': False, 'error': str(e)}
+    
+    ignore = set(ignore_patterns or [])
+    # Always ignore common typing imports and __future__
+    ignore.update(['annotations', 'TYPE_CHECKING'])
+    
+    issues: List[Dict[str, Any]] = []
+    
+    for nb in iter_notebooks(p):
+        data = read_nb(nb)
+        
+        for i, cell in enumerate(data.get('cells', [])):
+            if cell.get('cell_type') != 'code':
+                continue
+            src = join_source(cell.get('source', []))
+            
+            # Skip cells that are just directives
+            if not src.strip() or src.strip().startswith('#|'):
+                continue
+            
+            try:
+                tree = ast.parse(src)
+            except SyntaxError:
+                continue
+            
+            # Collect all imports
+            imported: Dict[str, str] = {}  # alias -> full module name
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Import):
+                    for alias in node.names:
+                        name = alias.asname or alias.name.split('.')[0]
+                        if name not in ignore:
+                            imported[name] = alias.name
+                elif isinstance(node, ast.ImportFrom):
+                    module = node.module or ''
+                    for alias in node.names:
+                        name = alias.asname or alias.name
+                        if name not in ignore and name != '*':
+                            imported[name] = f'{module}.{alias.name}' if module else alias.name
+            
+            if not imported:
+                continue
+            
+            # Collect all Name usages (excluding imports themselves)
+            used_names: set = set()
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Name):
+                    used_names.add(node.id)
+                elif isinstance(node, ast.Attribute):
+                    # Handle chained attributes like os.path.join
+                    n = node
+                    while isinstance(n, ast.Attribute):
+                        n = n.value
+                    if isinstance(n, ast.Name):
+                        used_names.add(n.id)
+            
+            # Find unused imports
+            unused = [name for name in imported if name not in used_names]
+            
+            if unused:
+                issues.append({
+                    'notebook': str(nb.relative_to(p)),
+                    'cell': i,
+                    'unused': unused,
+                    'message': f"Unused imports: {', '.join(unused)}"
+                })
+    
+    if issues:
+        rows = [[it['notebook'], str(it['cell']), ', '.join(it['unused'][:5])]
+                for it in issues[:200]]
+        pretty = render_table('unused imports', ['notebook', 'cell', 'unused'], rows)
+    else:
+        pretty = render_panel('lint_imports', 'No unused imports found.')
+    
+    return {
+        'ok': len(issues) == 0,
+        'issues': issues,
+        'total': len(issues),
+        'pretty': pretty
+    }
+
+
 # %% ../../nbs/11_tools/05_lint.ipynb 11
+def lint_types(
+    project: Optional[str] = None,
+    strict: bool = False
+) -> Dict[str, Any]:
+    """Check type annotations in notebook cells.
+    
+    Validates that exported functions and classes have type hints.
+    Uses AST parsing to detect missing annotations.
+    
+    Parameters
+    ----------
+    project : str, optional
+        Project path or alias. Uses current project if not specified.
+    strict : bool
+        If True, require all parameters to have type hints.
+        If False (default), only check return type annotations.
+    
+    Returns
+    -------
+    Dict[str, Any]
+        Result with 'issues' list of missing type annotations.
+    """
+    try:
+        p = resolve_selector(project)
+    except Exception as e:
+        return {'ok': False, 'error': str(e)}
+    
+    issues: List[Dict[str, Any]] = []
+    
+    for nb in iter_notebooks(p):
+        data = read_nb(nb)
+        
+        for i, cell in enumerate(data.get('cells', [])):
+            if cell.get('cell_type') != 'code':
+                continue
+            src = join_source(cell.get('source', []))
+            
+            # Only check exported cells
+            if not re.search(r'#\|\s*export\s*$', src, re.MULTILINE):
+                continue
+            
+            try:
+                tree = ast.parse(src)
+            except SyntaxError:
+                continue
+            
+            for node in ast.walk(tree):
+                if isinstance(node, ast.FunctionDef) or isinstance(node, ast.AsyncFunctionDef):
+                    func_issues = []
+                    
+                    # Check return type annotation
+                    if node.returns is None:
+                        func_issues.append('missing return type')
+                    
+                    # In strict mode, check parameter annotations
+                    if strict:
+                        for arg in node.args.args:
+                            if arg.arg != 'self' and arg.annotation is None:
+                                func_issues.append(f"parameter '{arg.arg}' missing type")
+                    
+                    if func_issues:
+                        issues.append({
+                            'notebook': str(nb.relative_to(p)),
+                            'cell': i,
+                            'function': node.name,
+                            'issues': func_issues,
+                            'message': f"Function '{node.name}': {', '.join(func_issues)}"
+                        })
+                
+                elif isinstance(node, ast.ClassDef):
+                    # Check __init__ method for type hints in strict mode
+                    if strict:
+                        for item in node.body:
+                            if isinstance(item, ast.FunctionDef) and item.name == '__init__':
+                                for arg in item.args.args:
+                                    if arg.arg not in ('self', 'cls') and arg.annotation is None:
+                                        issues.append({
+                                            'notebook': str(nb.relative_to(p)),
+                                            'cell': i,
+                                            'class': node.name,
+                                            'function': '__init__',
+                                            'issues': [f"parameter '{arg.arg}' missing type"],
+                                            'message': f"Class '{node.name}.__init__': parameter '{arg.arg}' missing type"
+                                        })
+    
+    if issues:
+        rows = [[it['notebook'], str(it['cell']), it.get('function') or it.get('class', ''), it['message'][:60]]
+                for it in issues[:200]]
+        pretty = render_table('type annotation issues', ['notebook', 'cell', 'name', 'issue'], rows)
+    else:
+        pretty = render_panel('lint_types', 'All exported functions have type annotations.')
+    
+    return {
+        'ok': len(issues) == 0,
+        'issues': issues,
+        'total': len(issues),
+        'pretty': pretty
+    }
+
+# %% ../../nbs/11_tools/05_lint.ipynb 12
+def auto_fix_lint(
+    project: Optional[str] = None,
+    fix_relative: bool = True,
+    fix_inits: bool = True,
+    dry_run: bool = False
+) -> Dict[str, Any]:
+    """Auto-fix common lint issues in notebooks.
+    
+    Automatically fixes:
+    - Relative imports -> absolute imports
+    - Incorrect default_exp in 00__init__.ipynb notebooks
+    
+    Parameters
+    ----------
+    project : str, optional
+        Project path or alias. Uses current project if not specified.
+    fix_relative : bool
+        If True, convert relative imports to absolute.
+    fix_inits : bool
+        If True, fix incorrect default_exp in __init__ notebooks.
+    dry_run : bool
+        If True, report what would be fixed without making changes.
+    
+    Returns
+    -------
+    Dict[str, Any]
+        Result with 'fixes' list of applied/proposed fixes.
+    """
+    try:
+        p = resolve_selector(project)
+    except Exception as e:
+        return {'ok': False, 'error': str(e)}
+    
+    fixes: List[Dict[str, Any]] = []
+    modified_files = 0
+    
+    if fix_inits:
+        init_result = validate_inits(project=str(p), fix=not dry_run)
+        if init_result.get('problems'):
+            for prob in init_result['problems']:
+                fixes.append({
+                    'type': 'init_default_exp',
+                    'notebook': prob['notebook'],
+                    'found': prob['found'],
+                    'expected': prob['expected'],
+                    'status': 'would fix' if dry_run else 'fixed'
+                })
+            if not dry_run:
+                modified_files += init_result.get('fixed', 0)
+    
+    if fix_relative:
+        lint_result = lint_rules(project=str(p), fix_relative=not dry_run)
+        for issue in lint_result.get('issues', []):
+            if issue.get('rule') == 'no_relative_imports':
+                fixes.append({
+                    'type': 'relative_import',
+                    'notebook': issue.get('notebook'),
+                    'cell': issue.get('cell'),
+                    'message': issue.get('message'),
+                    'suggestion': issue.get('suggestion'),
+                    'status': 'would fix' if dry_run else 'fixed'
+                })
+        if not dry_run:
+            modified_files += lint_result.get('modified', 0)
+    
+    if fixes:
+        rows = [[f['type'], f.get('notebook', ''), f['status'], f.get('message', '')[:50]]
+                for f in fixes[:200]]
+        pretty = render_table(f"auto_fix_lint ({'dry run' if dry_run else 'applied'})",
+                              ['type', 'notebook', 'status', 'detail'], rows)
+    else:
+        pretty = render_panel('auto_fix_lint', 'No issues to fix.')
+    
+    return {
+        'ok': True,
+        'fixes': fixes,
+        'total_fixes': len(fixes),
+        'modified_files': modified_files,
+        'dry_run': dry_run,
+        'pretty': pretty
+    }
+
+# %% ../../nbs/11_tools/05_lint.ipynb 14
+def lint_notebook_structure(
+    project: Optional[str] = None,
+    fix: bool = False
+) -> Dict[str, Any]:
+    """Check and fix notebook structure for nbdev conventions.
+    
+    Checks that notebooks have:
+    - Standard ending structure (## Next, empty export, ## Export, nbdev_export)
+    - Properly formatted headers with backticks for code names
+    
+    Parameters
+    ----------
+    project : str, optional
+        Project path or alias. Uses current project if not specified.
+    fix : bool
+        If True, automatically fix structure issues.
+    
+    Returns
+    -------
+    Dict[str, Any]
+        Result dict with:
+        - ok: bool - Success status
+        - issues: List[Dict] - Structure issues found
+        - fixed: int - Number of notebooks fixed (if fix=True)
+        - pretty: str - Formatted output
+    """
+    try:
+        p = resolve_selector(project)
+    except Exception as e:
+        return {'ok': False, 'error': str(e)}
+    
+    issues: List[Dict[str, Any]] = []
+    fixed_count = 0
+    
+    for nb_path in iter_notebooks(p):
+        nb_issues: List[str] = []
+        rel_path = str(nb_path.relative_to(p))
+        
+        try:
+            nb = read_notebook(nb_path)
+            
+            # Check for standard ending
+            if not has_standard_ending(nb):
+                nb_issues.append('missing_standard_ending')
+            
+            # Check for header formatting issues
+            code_name_pattern = re.compile(r'^(#+)\s+([a-z_][a-z0-9_]*(?:\([^)]*\))?)(\s*$|\s+\w)', re.IGNORECASE)
+            for i, cell in enumerate(nb.cells):
+                if cell.cell_type == 'markdown':
+                    source = cell.source if isinstance(cell.source, str) else ''.join(cell.source)
+                    for line in source.split('\n'):
+                        if line.startswith('#'):
+                            m = code_name_pattern.match(line)
+                            if m and '`' not in line:
+                                name = m.group(2)
+                                # Check if it looks like a function/class name
+                                if '_' in name or name.endswith(')') or name[0].islower():
+                                    nb_issues.append(f'unformatted_header_cell_{i}')
+                                    break
+            
+            if nb_issues:
+                issues.append({
+                    'notebook': rel_path,
+                    'issues': nb_issues
+                })
+                
+                if fix:
+                    result = standardize_notebook(nb_path, write=True)
+                    if result.get('modified'):
+                        fixed_count += 1
+        
+        except Exception as e:
+            issues.append({
+                'notebook': rel_path,
+                'issues': ['error'],
+                'error': str(e)
+            })
+    
+    # Build pretty output
+    if issues:
+        rows = [[issue['notebook'], ', '.join(issue['issues'][:3])] for issue in issues[:50]]
+        status = f"{len(issues)} notebooks with issues"
+        if fix:
+            status += f", {fixed_count} fixed"
+        pretty = render_table(f"lint_notebook_structure: {status}", 
+                              ['notebook', 'issues'], rows)
+    else:
+        pretty = render_panel('lint_notebook_structure', 'All notebooks have correct structure.')
+    
+    return {
+        'ok': True,
+        'issues': issues,
+        'total_issues': len(issues),
+        'fixed': fixed_count,
+        'pretty': pretty
+    }
+
+# %% ../../nbs/11_tools/05_lint.ipynb 15
+def lint_private_attributes(
+    project: Optional[str] = None,
+    allow_patterns: Optional[List[str]] = None
+) -> Dict[str, Any]:
+    """Flag private attributes (self._xxx) in exported classes.
+    
+    MCP tools should be stateless. Private attributes suggest hidden state
+    that persists between calls, which breaks the MCP model.
+    
+    Parameters
+    ----------
+    project : str, optional
+        Project path or alias.
+    allow_patterns : List[str], optional
+        List of attribute name patterns to allow (e.g., ['_cache', '_lock']).
+    
+    Returns
+    -------
+    Dict[str, Any]
+        Result with 'issues' list of private attribute usages.
+    """
+    try:
+        p = resolve_selector(project)
+    except Exception as e:
+        return {'ok': False, 'error': str(e)}
+    
+    allowed = set(allow_patterns or [])
+    issues: List[Dict[str, Any]] = []
+    
+    private_attr_pattern = re.compile(r'self\.(_\w+)')
+    
+    for nb in iter_notebooks(p):
+        data = read_nb(nb)
+        
+        for i, cell in enumerate(data.get('cells', [])):
+            if cell.get('cell_type') != 'code':
+                continue
+            src = join_source(cell.get('source', []))
+            
+            if not re.search(r'#\|\s*export\s*$', src, re.MULTILINE):
+                continue
+            
+            for line_no, line in enumerate(src.splitlines(), 1):
+                for m in private_attr_pattern.finditer(line):
+                    attr_name = m.group(1)
+                    if attr_name not in allowed:
+                        try:
+                            tree = ast.parse(src)
+                            in_class = any(isinstance(node, ast.ClassDef) for node in ast.walk(tree))
+                            if in_class:
+                                issues.append({
+                                    'notebook': str(nb.relative_to(p)),
+                                    'cell': i,
+                                    'line': line_no,
+                                    'attribute': attr_name,
+                                    'message': f"Private attribute {attr_name} found. MCP tools should be stateless."
+                                })
+                        except SyntaxError:
+                            pass
+    
+    if issues:
+        rows = [[it['notebook'], str(it['cell']), str(it['line']), it['attribute'], it['message'][:40]]
+                for it in issues[:100]]
+        pretty = render_table(
+            'Private Attribute Issues',
+            ['Notebook', 'Cell', 'Line', 'Attribute', 'Message'],
+            rows
+        )
+    else:
+        pretty = render_panel('No private attributes found in exported classes', title='Private Attributes', style='green')
+    
+    return {'ok': True, 'issues': issues, 'count': len(issues), 'pretty': pretty}
+
+# %% ../../nbs/11_tools/05_lint.ipynb 16
+def lint_cell_complexity(
+    project: Optional[str] = None,
+    max_classes: int = 1,
+    max_functions: int = 2
+) -> Dict[str, Any]:
+    """Flag cells with too many definitions (classes/functions).
+    
+    nbdev encourages one class or function per cell for:
+    - Granular testing
+    - Clear cell-level documentation
+    - Literate programming readability
+    
+    Parameters
+    ----------
+    project : str, optional
+        Project path or alias.
+    max_classes : int
+        Maximum classes allowed per cell (default: 1).
+    max_functions : int
+        Maximum functions allowed per cell (default: 2).
+    
+    Returns
+    -------
+    Dict[str, Any]
+        Result with 'issues' list of overly complex cells.
+    """
+    try:
+        p = resolve_selector(project)
+    except Exception as e:
+        return {'ok': False, 'error': str(e)}
+    
+    issues: List[Dict[str, Any]] = []
+    
+    for nb in iter_notebooks(p):
+        data = read_nb(nb)
+        
+        for i, cell in enumerate(data.get('cells', [])):
+            if cell.get('cell_type') != 'code':
+                continue
+            src = join_source(cell.get('source', []))
+            
+            if not re.search(r'#\|\s*export\s*$', src, re.MULTILINE):
+                continue
+            
+            try:
+                tree = ast.parse(src)
+            except SyntaxError:
+                continue
+            
+            classes = [n for n in ast.iter_child_nodes(tree) if isinstance(n, ast.ClassDef)]
+            functions = [n for n in ast.iter_child_nodes(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]
+            
+            if len(classes) > max_classes or len(functions) > max_functions:
+                issues.append({
+                    'notebook': str(nb.relative_to(p)),
+                    'cell': i,
+                    'classes': len(classes),
+                    'functions': len(functions),
+                    'class_names': [c.name for c in classes],
+                    'function_names': [f.name for f in functions],
+                    'message': f"Cell has {len(classes)} classes and {len(functions)} functions. Consider splitting."
+                })
+    
+    if issues:
+        rows = [[it['notebook'], str(it['cell']), str(it['classes']), str(it['functions']), it['message'][:50]]
+                for it in issues[:100]]
+        pretty = render_table(
+            'Cell Complexity Issues',
+            ['Notebook', 'Cell', 'Classes', 'Functions', 'Message'],
+            rows
+        )
+    else:
+        pretty = render_panel('All cells have appropriate complexity', title='Cell Complexity', style='green')
+    
+    return {'ok': True, 'issues': issues, 'count': len(issues), 'pretty': pretty}
+
+# %% ../../nbs/11_tools/05_lint.ipynb 17
+def lint_import_order(
+    project: Optional[str] = None
+) -> Dict[str, Any]:
+    """Check that `from __future__ import` is in the first export cell.
+    
+    Python requires __future__ imports to be at the top of a module.
+    In nbdev, this means the first export cell must contain any
+    __future__ imports, before other export cells.
+    
+    Parameters
+    ----------
+    project : str, optional
+        Project path or alias.
+    
+    Returns
+    -------
+    Dict[str, Any]
+        Result with 'issues' list of import order violations.
+    """
+    try:
+        p = resolve_selector(project)
+    except Exception as e:
+        return {'ok': False, 'error': str(e)}
+    
+    issues: List[Dict[str, Any]] = []
+    
+    for nb in iter_notebooks(p):
+        data = read_nb(nb)
+        first_export_cell = None
+        
+        for i, cell in enumerate(data.get('cells', [])):
+            if cell.get('cell_type') != 'code':
+                continue
+            src = join_source(cell.get('source', []))
+            
+            if re.search(r'#\|\s*export\s*$', src, re.MULTILINE):
+                if first_export_cell is None:
+                    first_export_cell = i
+                elif 'from __future__ import' in src:
+                    issues.append({
+                        'notebook': str(nb.relative_to(p)),
+                        'cell': i,
+                        'first_export_cell': first_export_cell,
+                        'message': f"__future__ import should be in first export cell (cell {first_export_cell}), not cell {i}"
+                    })
+    
+    if issues:
+        rows = [[it['notebook'], str(it['cell']), str(it['first_export_cell']), it['message'][:60]]
+                for it in issues[:100]]
+        pretty = render_table(
+            'Import Order Issues',
+            ['Notebook', 'Cell', 'First Export', 'Message'],
+            rows
+        )
+    else:
+        pretty = render_panel('All __future__ imports are correctly placed', title='Import Order', style='green')
+    
+    return {'ok': True, 'issues': issues, 'count': len(issues), 'pretty': pretty}
+
+# %% ../../nbs/11_tools/05_lint.ipynb 19
+# Tool annotation definitions for lint tools
+LINT_TOOL_ANNOTATIONS = {
+    'validate_inits': ToolAnnotations(
+        title="Validate Inits",
+        readOnlyHint=False,
+        idempotentHint=True,
+        openWorldHint=False
+    ),
+    'lint_rules': ToolAnnotations(
+        title="Lint Rules",
+        readOnlyHint=False,
+        idempotentHint=True,
+        openWorldHint=False
+    ),
+    'lint_main_guards': ToolAnnotations(
+        title="Lint Main Guards",
+        readOnlyHint=True,
+        idempotentHint=True,
+        openWorldHint=False
+    ),
+    'lint_imports': ToolAnnotations(
+        title="Lint Imports",
+        readOnlyHint=True,
+        idempotentHint=True,
+        openWorldHint=False
+    ),
+    'lint_types': ToolAnnotations(
+        title="Lint Types",
+        readOnlyHint=True,
+        idempotentHint=True,
+        openWorldHint=False
+    ),
+    'auto_fix_lint': ToolAnnotations(
+        title="Auto Fix Lint",
+        readOnlyHint=False,
+        idempotentHint=True,
+        openWorldHint=False
+    ),
+    'lint_notebook_structure': ToolAnnotations(
+        title="Lint Notebook Structure",
+        readOnlyHint=False,
+        idempotentHint=True,
+        openWorldHint=False
+    ),
+    'lint_private_attributes': ToolAnnotations(
+        title="Lint Private Attributes",
+        readOnlyHint=True,
+        idempotentHint=True,
+        openWorldHint=False
+    ),
+    'lint_cell_complexity': ToolAnnotations(
+        title="Lint Cell Complexity",
+        readOnlyHint=True,
+        idempotentHint=True,
+        openWorldHint=False
+    ),
+    'lint_import_order': ToolAnnotations(
+        title="Lint Import Order",
+        readOnlyHint=True,
+        idempotentHint=True,
+        openWorldHint=False
+    ),
+}
+
 def add_lint_tools(mcp: FastMCP) -> None:
-    """Attach linting tools to the MCP server.
+    """Register all lint tools with the MCP server.
     
     Parameters
     ----------
     mcp : FastMCP
-        The MCP server instance.
+        The MCP server instance to register tools with.
     """
-    mcp.add_tool(validate_inits)
-    mcp.add_tool(lint_rules)
-    mcp.add_tool(lint_main_guards)
+    tools = [
+        ('validate_inits', validate_inits),
+        ('lint_rules', lint_rules),
+        ('lint_main_guards', lint_main_guards),
+        ('lint_imports', lint_imports),
+        ('lint_types', lint_types),
+        ('auto_fix_lint', auto_fix_lint),
+        ('lint_notebook_structure', lint_notebook_structure),
+        ('lint_private_attributes', lint_private_attributes),
+        ('lint_cell_complexity', lint_cell_complexity),
+        ('lint_import_order', lint_import_order),
+    ]
+    
+    for name, func in tools:
+        annotations = LINT_TOOL_ANNOTATIONS.get(name)
+        mcp.tool(name=name, annotations=annotations)(func)

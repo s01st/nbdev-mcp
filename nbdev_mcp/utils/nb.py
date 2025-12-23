@@ -6,7 +6,7 @@
 from __future__ import annotations
 from typing import Any, Dict, List, Optional, Iterable, Tuple, Set, Callable
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import ast
 from pathlib import Path
@@ -295,12 +295,15 @@ class Import:
     ----------
     module : str
         Module name being imported.
+    names : List[str]
+        Names imported from the module (empty for 'import foo' style).
     is_relative : bool
         True if this is a relative import (default False).
     level : int
         Number of dots for relative imports (default 0).
     """
     module: str
+    names: List[str] = field(default_factory=list)
     is_relative: bool = False
     level: int = 0
 
@@ -327,11 +330,12 @@ def extract_imports(source: str) -> List[Import]:
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
-                imports.append(Import(alias.name, is_relative=False))
+                imports.append(Import(alias.name, names=[], is_relative=False))
         elif isinstance(node, ast.ImportFrom):
             module = node.module or ''
             is_rel = node.level > 0
-            imports.append(Import(module, is_relative=is_rel, level=node.level))
+            names = [alias.name for alias in node.names]
+            imports.append(Import(module, names=names, is_relative=is_rel, level=node.level))
     return imports
 
 # %% ../../nbs/00_utils/07_nb.ipynb 23
@@ -362,6 +366,7 @@ def split_imports(imports: List[Import], lib_name: str) -> Tuple[Set[str], Set[s
     return internal, external
 
 # %% ../../nbs/00_utils/07_nb.ipynb 25
+#| skip_showdoc: true
 def iter_export_cells(nb: NBFile | Dict[str, Any]) -> Iterable[Cell]:
     """Iterate over cells that have export directives.
     

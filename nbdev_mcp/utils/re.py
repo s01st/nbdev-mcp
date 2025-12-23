@@ -16,8 +16,8 @@ __all__ = ['HEADER_PATTERN', 'REFERENCE_PATTERN', 'REF_LINK_USAGE_PATTERN', 'BAR
            'EXPORTA_DIRECTIVE_PATTERN', 'EXPORT_ANY_RE', 'DEFAULT_EXP_PATTERN', 'HIDE_DIRECTIVE_PATTERN',
            'EVAL_FALSE_PATTERN', 'FUNCTION_DEF_PATTERN', 'ASYNC_FUNCTION_DEF_PATTERN', 'CLASS_DEF_PATTERN',
            'ALL_DEFINITION_PATTERN', 'TEST_FUNCTION_PATTERN', 'ASSERT_PATTERN', 'PYTEST_MARKER_PATTERN',
-           'MAIN_GUARD_PATTERN', 'YAML_NAME_PATTERN', 'NBDEV_CELL_COMMENT_PATTERN', 'DIGIT_PREFIX', 'NBDEV_FILE_PREFIX',
-           'PATTERN_CATALOG']
+           'MAIN_GUARD_PATTERN', 'EXPORT_MAIN_PATTERN', 'YAML_NAME_PATTERN', 'NBDEV_CELL_COMMENT_PATTERN',
+           'DIGIT_PREFIX', 'NBDEV_FILE_PREFIX', 'NUMBERED_NOTEBOOK_PATTERN', 'PATTERN_CATALOG']
 
 # %% ../../nbs/00_utils/05_re.ipynb 7
 HEADER_PATTERN = re.compile(r"^#{1,6}\s")
@@ -110,6 +110,8 @@ PYTEST_MARKER_PATTERN = re.compile(r"@pytest\.mark\.\w+", re.MULTILINE)
 MAIN_GUARD_PATTERN = re.compile(r"^\s*if\s+__name__\s*==\s*['\"]__main__['\"]\s*:", re.MULTILINE)
 '''Detect `if __name__ == "__main__":` guards in code cells.'''
 
+EXPORT_MAIN_PATTERN = re.compile(r"^\s*#\|\s*export\s+__main__", re.MULTILINE | re.IGNORECASE)
+'''Match `#| export __main__` directive for safe main module exports.'''
 
 # %% ../../nbs/00_utils/05_re.ipynb 21
 YAML_NAME_PATTERN = re.compile(r"^\s*name\s*:\s*([A-Za-z0-9._-]+)\s*$")
@@ -121,8 +123,11 @@ NBDEV_CELL_COMMENT_PATTERN = re.compile(r"#\s*%%\s*(\.\./nbs/[\w/]+\.ipynb)\s+(\
 DIGIT_PREFIX = re.compile(r"^\d+_")
 '''Match digit prefix e.g. `04_nb.ipynb`.'''
 
-NBDEV_FILE_PREFIX = re.compile(r'^\d+[a-z]?_')
-'''Match nbdev file prefix e.g. `04_nb.ipynb`.'''
+NBDEV_FILE_PREFIX = re.compile(r'^\\d+[a-z]?_')
+'''Match nbdev file prefix e.g. `04_nb.ipynb` or `04a_special.ipynb`.'''
+
+NUMBERED_NOTEBOOK_PATTERN = re.compile(r"^\d{2}_.+\.ipynb$")
+'''Match properly numbered nbdev notebooks (e.g., `00_core.ipynb`, `01_utils.ipynb`).'''
 
 # %% ../../nbs/00_utils/05_re.ipynb 23
 PATTERN_CATALOG: Dict[str, re.Pattern] = {
@@ -149,6 +154,7 @@ PATTERN_CATALOG: Dict[str, re.Pattern] = {
     "default_exp": DEFAULT_EXP_PATTERN,
     "hide_directive": HIDE_DIRECTIVE_PATTERN,
     "eval_false": EVAL_FALSE_PATTERN,
+    "export_main": EXPORT_MAIN_PATTERN,
     # Symbol definitions
     "function_def": FUNCTION_DEF_PATTERN,
     "async_function_def": ASYNC_FUNCTION_DEF_PATTERN,
@@ -165,6 +171,7 @@ PATTERN_CATALOG: Dict[str, re.Pattern] = {
     "nbdev_cell_comment": NBDEV_CELL_COMMENT_PATTERN,
     "digit_prefix": DIGIT_PREFIX,
     "nbdev_file_prefix": NBDEV_FILE_PREFIX,
+    "numbered_notebook": NUMBERED_NOTEBOOK_PATTERN,
 }
 '''Lookup of named regular expressions used across the MCP codebase.'''
 

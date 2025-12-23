@@ -6,6 +6,19 @@
 __all__ = []
 
 # %% ../../nbs/11_tools/00__init__.ipynb 5
+"""MCP tool modules for nbdev project management.
+
+This package provides MCP tools organized by functionality:
+
+- project: Project selection, bookmarks, health checks
+- env: Conda/mamba environment management
+- nbdev: Build tools (export, prepare, test)
+- editing: Notebook cell reading, editing, and execution
+- lint: Notebook linting and validation
+- analysis: Dependency graphs, modidx audits, symbol search
+- tests: pytest generation and test scaffolding
+"""
+
 from .project import add_project_tools
 from .env import add_env_tools
 from .nbdev import add_nbdev_tools
@@ -13,3 +26,4 @@ from .editing import add_notebook_editing_tools
 from .lint import add_lint_tools
 from .analysis import add_analysis_tools
 from .tests import add_tests_tools
+

@@ -1,0 +1,197 @@
+{
+  "name": "nbdev-mcp",
+  "displayName": "nbdev MCP",
+  "description": "VS Code extension for nbdev projects with MCP server integration",
+  "version": "0.1.0",
+  "publisher": "nbdev-mcp",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yourusername/nbdev-mcp"
+  },
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Linters",
+    "Other"
+  ],
+  "keywords": [
+    "nbdev",
+    "jupyter",
+    "notebook",
+    "mcp",
+    "literate programming"
+  ],
+  "activationEvents": [
+    "workspaceContains:**/settings.ini",
+    "workspaceContains:**/_modidx.py"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "nbdev-mcp.setProject",
+        "title": "Set Active Project",
+        "category": "nbdev"
+      },
+      {
+        "command": "nbdev-mcp.currentProject",
+        "title": "Show Current Project",
+        "category": "nbdev"
+      },
+      {
+        "command": "nbdev-mcp.export",
+        "title": "Export Notebooks",
+        "category": "nbdev"
+      },
+      {
+        "command": "nbdev-mcp.prepare",
+        "title": "Prepare (Export, Test, Clean)",
+        "category": "nbdev"
+      },
+      {
+        "command": "nbdev-mcp.test",
+        "title": "Run Tests",
+        "category": "nbdev"
+      },
+      {
+        "command": "nbdev-mcp.lint",
+        "title": "Lint Notebooks",
+        "category": "nbdev"
+      },
+      {
+        "command": "nbdev-mcp.lintImports",
+        "title": "Check Unused Imports",
+        "category": "nbdev"
+      },
+      {
+        "command": "nbdev-mcp.findSymbol",
+        "title": "Find Symbol",
+        "category": "nbdev"
+      },
+      {
+        "command": "nbdev-mcp.analyzeExports",
+        "title": "Analyze Notebook Exports",
+        "category": "nbdev"
+      },
+      {
+        "command": "nbdev-mcp.dependencyTree",
+        "title": "Show Dependency Tree",
+        "category": "nbdev"
+      },
+      {
+        "command": "nbdev-mcp.modidxAudit",
+        "title": "Audit Module Index",
+        "category": "nbdev"
+      },
+      {
+        "command": "nbdev-mcp.scanErrors",
+        "title": "Scan Notebook Errors",
+        "category": "nbdev"
+      },
+      {
+        "command": "nbdev-mcp.runTutorials",
+        "title": "Run Tutorials",
+        "category": "nbdev"
+      },
+      {
+        "command": "nbdev-mcp.findSourceNotebook",
+        "title": "Find Source Notebook for Python File",
+        "category": "nbdev"
+      },
+      {
+        "command": "nbdev-mcp.checkIfGenerated",
+        "title": "Check if File is Generated",
+        "category": "nbdev"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "nbdev-mcp.findSourceNotebook",
+          "when": "resourceExtname == .py",
+          "group": "nbdev"
+        },
+        {
+          "command": "nbdev-mcp.checkIfGenerated",
+          "when": "resourceExtname == .py",
+          "group": "nbdev"
+        },
+        {
+          "command": "nbdev-mcp.analyzeExports",
+          "when": "resourceExtname == .ipynb",
+          "group": "nbdev"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "nbdev-mcp.findSourceNotebook",
+          "when": "resourceExtname == .py",
+          "group": "nbdev"
+        },
+        {
+          "command": "nbdev-mcp.analyzeExports",
+          "when": "resourceExtname == .ipynb",
+          "group": "nbdev"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "nbdev MCP",
+      "properties": {
+        "nbdev-mcp.mcpServerPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to nbdev-mcp server executable (leave empty to use system PATH)"
+        },
+        "nbdev-mcp.autoDetectProject": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically detect nbdev project from workspace"
+        },
+        "nbdev-mcp.showDiagnostics": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show lint diagnostics in Problems panel"
+        },
+        "nbdev-mcp.lintOnSave": {
+          "type": "boolean",
+          "default": false,
+          "description": "Run lint check when saving notebooks"
+        }
+      }
+    },
+    "problemMatchers": [
+      {
+        "name": "nbdev",
+        "owner": "nbdev-mcp",
+        "fileLocation": ["relative", "${workspaceFolder}"],
+        "pattern": {
+          "regexp": "^(.*):(\\d+):\\s+(.*)$",
+          "file": 1,
+          "line": 2,
+          "message": 3
+        }
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "pretest": "npm run compile",
+    "lint": "eslint src --ext ts",
+    "package": "vsce package"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "@types/vscode": "^1.85.0",
+    "@typescript-eslint/eslint-plugin": "^6.13.0",
+    "@typescript-eslint/parser": "^6.13.0",
+    "eslint": "^8.55.0",
+    "typescript": "^5.3.0",
+    "@vscode/vsce": "^2.22.0"
+  },
+  "dependencies": {}
+}

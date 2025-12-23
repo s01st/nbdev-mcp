@@ -15,6 +15,7 @@ from . import __version__
 from .utils.logs import log
 from .utils.config import CURRENT_PROJECT
 from .utils.paths import resolve_selector
+from .utils.subprocess import watch_notebooks
 from .resources import add_resources
 from nbdev_mcp.tools import (
     add_project_tools, add_env_tools, add_nbdev_tools, 
@@ -22,6 +23,7 @@ from nbdev_mcp.tools import (
     add_analysis_tools, add_tests_tools
 )
 from .prompts import add_prompts
+from .tasks import add_task_tools, enable_nbdev_tasks
 
 # %% auto 0
 __all__ = ['set_http_path_if_supported', 'create_nbdev_mcp', 'main']
@@ -55,6 +57,10 @@ def set_http_path_if_supported(target_path: str) -> bool:
 def create_nbdev_mcp(name: str = "mcp.nbdev") -> FastMCP:
     """Create and configure the nbdev MCP server with all resources, tools, and prompts."""
     mcp = FastMCP(name)
+    
+    # Enable experimental tasks API
+    enable_nbdev_tasks(mcp)
+    
     # Attach all nbdev-related resources, tools, and prompts
     add_resources(mcp)
     add_project_tools(mcp)
@@ -62,10 +68,15 @@ def create_nbdev_mcp(name: str = "mcp.nbdev") -> FastMCP:
     add_nbdev_tools(mcp)
     add_notebook_editing_tools(mcp)  # CRITICAL: Notebook editing and workflow tools
     add_prompts(mcp)  # Philosophy prompts must come after tools are registered
+    
     # Extensions: linting, analysis, and code generation tools
     add_lint_tools(mcp)
     add_analysis_tools(mcp)
     add_tests_tools(mcp)
+    
+    # Task-based tools for auditing, deduplication, and refactoring
+    add_task_tools(mcp)
+    
     return mcp
 
 # %% ../nbs/30_mcp.ipynb 10
@@ -75,7 +86,8 @@ def main() -> None:
         description="nbdev MCP server (multi-project, rich output)",
         formatter_class=argparse.RawTextHelpFormatter,
         epilog=(
-            "Example: python mcp.nbdev.py --transport http --host 0.0.0.0 --port 8765 --path /mcp\\n"
+            "Example: python mcp.nbdev.py --transport http --host 0.0.0.0 --port 8765 --path /mcp\n"
+            "Example: nbdev-mcp --watch --project /path/to/project  # Watch mode\n"
             "Note: Ensure 'uvicorn' is installed for custom HTTP server."
         )
     )
@@ -89,19 +101,57 @@ def main() -> None:
                         help="Port to serve on (default: NBDEV_MCP_PORT or 8000).")
     parser.add_argument("--path", default=os.environ.get("NBDEV_MCP_PATH", "/mcp"),
                         help="Base URL path for HTTP transport (default: NBDEV_MCP_PATH or /mcp).")
+    parser.add_argument("-v", "--verbose", action="store_true",
+                        help="Enable verbose/debug output for troubleshooting.")
+    parser.add_argument("-w", "--watch", action="store_true",
+                        help="Watch mode: monitor notebooks and auto-export on changes (requires --project).")
+    parser.add_argument("--watch-interval", type=float, default=2.0,
+                        help="Watch mode polling interval in seconds (default: 2.0).")
+    parser.add_argument("--watch-cmd", default="nbdev_export",
+                        help="Command to run on change in watch mode (default: nbdev_export).")
     parser.add_argument("-V", "--version", action="version", version=f"%(prog)s {__version__}")
     args = parser.parse_args()
 
+    # Configure logging based on verbose flag
+    if args.verbose:
+        import logging
+        logging.basicConfig(
+            level=logging.DEBUG,
+            format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S"
+        )
+        log.setLevel(logging.DEBUG)
+        log.debug("Verbose mode enabled")
+        log.debug(f"Python: {sys.version}")
+        log.debug(f"nbdev-mcp version: {__version__}")
+        log.debug(f"Transport: {args.transport}")
+        log.debug(f"Project: {args.project or 'None'}")
+
     # If an initial project path or alias is provided, set it now
+    proj_path = None
     if args.project:
         try:
             proj_path = resolve_selector(args.project)
             CURRENT_PROJECT = proj_path  # set the global current project
+            if args.verbose:
+                log.debug(f"Initial project set to: {proj_path}")
         except Exception as e:
             log.error(str(e))
+            if args.watch:
+                sys.exit(1)
+
+    # Watch mode: monitor notebooks and auto-export
+    if args.watch:
+        if not proj_path:
+            log.error("Watch mode requires --project to be specified")
+            sys.exit(1)
+        watch_notebooks(proj_path, interval=args.watch_interval, on_change=args.watch_cmd)
+        return  # Exit after watch mode ends
 
     # Build the MCP server with all nbdev features
     mcp = create_nbdev_mcp()
+    if args.verbose:
+        log.debug("MCP server created with all tools, resources, and prompts")
 
     # Decide transport using structural pattern matching (Python 3.10+)
     default_host, default_port, default_path = "127.0.0.1", 8000, "/mcp"
@@ -109,10 +159,14 @@ def main() -> None:
 
     match args.transport:
         case "stdio":
+            if args.verbose:
+                log.debug("Starting MCP server with stdio transport")
             mcp.run(transport="stdio")
         case "streamable-http":
             if using_defaults:
                 # Default behavior: run built-in server on 127.0.0.1:8000 at /mcp
+                if args.verbose:
+                    log.debug(f"Starting MCP server with streamable-http transport on {default_host}:{default_port}{default_path}")
                 mcp.run(transport="streamable-http")
             else:
                 # Custom host/port for streamable HTTP – use Uvicorn as fallback
@@ -125,6 +179,8 @@ def main() -> None:
                     ok = set_http_path_if_supported(args.path)
                     if not ok:
                         log.warning("Could not set custom HTTP path on this SDK; using default '/mcp'.")
+                if args.verbose:
+                    log.debug(f"Starting MCP server with streamable-http transport via uvicorn on {args.host}:{args.port}")
                 app = mcp.streamable_http_app()
                 uvicorn.run(app, host=args.host, port=args.port)
         case "http":
@@ -138,11 +194,12 @@ def main() -> None:
             if args.path and args.path != default_path:
                 if not ok:
                     log.warning("Could not set custom HTTP path on this SDK; using default '/mcp'.")
+            if args.verbose:
+                log.debug(f"Starting MCP server with http transport via uvicorn on {args.host}:{args.port}")
             app = mcp.streamable_http_app()
             uvicorn.run(app, host=args.host, port=args.port)
         case _:
             raise SystemExit(f"Unsupported transport option: {args.transport!r}")
-
 
 # %% ../nbs/30_mcp.ipynb 12
 #| export

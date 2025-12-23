@@ -6,5 +6,19 @@
 __all__ = []
 
 # %% ../../nbs/00_utils/00__init__.ipynb 5
-#| export
+"""Core utilities for nbdev-mcp.
+
+This package provides foundational utilities for nbdev project management:
+
+- config: Global configuration and project bookmarks
+- exceptions: Custom exception hierarchy with notebook location tracking
+- logs: Logging setup and configuration
+- md: Markdown parsing and cell splitting
+- nb: Notebook cell primitives (Cell, NBFile, Symbol, Import)
+- paths: Path utilities, project resolution, and notebook iteration
+- re: Centralized regex patterns for nbdev directives
+- rich: Rich console output helpers
+- subprocess: Shell command execution with environment wrapping
+- types: ToolResult and Issue dataclasses
+"""
 

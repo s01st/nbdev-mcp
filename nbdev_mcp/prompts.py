@@ -19,7 +19,8 @@ from .utils.paths import settings_dict
 __all__ = ['get_python_3_9_plus_package_file', 'get_python_3_8_minus_package_file', 'get_bundled_template',
            'prompt_template_path', 'prompt_context', 'render_prompt', 'nbdev_workflow_philosophy', 'nbdev_principles',
            'documentation_best_practices', 'future_imports_guidance', 'nbdev_howto', 'nbdev_documentation_guide',
-           'module_scaffold', 'nbdev_advanced_patterns', 'nbdev_main_patterns', 'add_prompts']
+           'module_scaffold', 'nbdev_advanced_patterns', 'nbdev_main_patterns', 'reuse_first_checklist',
+           'mcp_persistency', 'add_prompts', 'git_best_practices', 'python312_features']
 
 # %% ../nbs/20_prompts.ipynb 6
 def get_python_3_9_plus_package_file(file: str, module: str = "nbdev_mcp.prompt_templates"):
@@ -178,7 +179,18 @@ def nbdev_main_patterns() -> str:
     return render_prompt("main_pattern.md")
 
 
-# %% ../nbs/20_prompts.ipynb 20
+# %% ../nbs/20_prompts.ipynb 19
+def reuse_first_checklist() -> str:
+    """Reuse-first checklist for package-hierarchy alignment."""
+    return render_prompt("reuse_first_checklist.md")
+
+
+# %% ../nbs/20_prompts.ipynb 21
+def mcp_persistency() -> str:
+    """MCP persistency monitoring and recovery guidance."""
+    return render_prompt("mcp_persistency.md")
+
+# %% ../nbs/20_prompts.ipynb 22
 def add_prompts(mcp: FastMCP) -> None:
     """Attach custom prompts (nbdev usage help, module scaffold) to the MCP."""
     mcp.add_prompt(Prompt(
@@ -226,11 +238,31 @@ def add_prompts(mcp: FastMCP) -> None:
         description="Safe __main__ patterns and console scripts",
         fn=nbdev_main_patterns
     ))
-
-# %% ../nbs/20_prompts.ipynb 22
-#| export
+    mcp.add_prompt(Prompt(
+        name="reuse_first_checklist",
+        description="Reuse-first checklist for package-hierarchy alignment",
+        fn=reuse_first_checklist
+    ))
+    mcp.add_prompt(Prompt(
+        name="mcp_persistency",
+        description="MCP persistency monitoring and recovery guidance - use when MCP may be down",
+        fn=mcp_persistency
+    ))
+    mcp.add_prompt(Prompt(
+        name="git_best_practices",
+        description="Git best practices for nbdev - commit format, NO AI attribution",
+        fn=git_best_practices
+    ))
+    mcp.add_prompt(Prompt(
+        name="python312_features",
+        description="Python 3.12+ features for modern, clean code",
+        fn=python312_features
+    ))
 
 # %% ../nbs/20_prompts.ipynb 24
+#| export
+
+# %% ../nbs/20_prompts.ipynb 26
 def nbdev_export_templates(
     path: Path | None = None, 
     stem: str = '21_prompt_templates',
@@ -242,3 +274,13 @@ def nbdev_export_templates(
         if dest is None: 
             dest = (md.parent / '..' / '..').absolute().resolve() / 'nbdev_mcp/prompt_templates'
         out = shutil.copy2(md, dest / md.name)
+
+# %% ../nbs/20_prompts.ipynb 29
+def git_best_practices() -> str:
+    """Git best practices for nbdev projects - excludes AI attribution."""
+    return render_prompt("git_best_practices.md")
+
+# %% ../nbs/20_prompts.ipynb 30
+def python312_features() -> str:
+    """Python 3.12+ features for modern, clean code."""
+    return render_prompt("python312_features.md")

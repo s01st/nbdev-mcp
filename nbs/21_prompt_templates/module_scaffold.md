@@ -26,3 +26,16 @@ def my_function(x: int) -> int:
 y = my_function(1)
 assert y == 2
 ```
+
+
+## Next
+```python
+#| export
+
+```
+
+## Export
+```python
+#| hide
+import nbdev; nbdev.nbdev_export()
+```

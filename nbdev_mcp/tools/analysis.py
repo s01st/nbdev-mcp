@@ -14,16 +14,29 @@ import textwrap
 from pathlib import Path
 from rich.panel import Panel
 from mcp.server.fastmcp import FastMCP
+from mcp.types import ToolAnnotations
 
 from nbdev_mcp.utils.paths import (
     nbs_dir, settings_dict, resolve_selector, iter_notebooks,
-    read_nb, abs_module_for_nb,
+    read_nb, abs_module_for_nb, modidx_path, load_modidx, symbol_locations,
 )
 from ..utils.nb import join_source, find_default_exp
 from ..utils.rich import render_table, render_panel
+from nbdev_mcp.utils.extlib import (
+    index_project_externals as _index_project_externals,
+    lookup_symbol as _lookup_symbol,
+    scan_project_imports,
+)
+from nbdev_mcp.utils.depgraph import (
+    generate_interactive_graph as _generate_interactive_graph,
+    build_graph, detect_duplicates,
+)
 
 # %% auto 0
-__all__ = ['analyze_dependency_order', 'dependency_tree', 'add_analysis_tools']
+__all__ = ['ANALYSIS_TOOL_ANNOTATIONS', 'UTILS_REGISTRY', 'analyze_dependency_order', 'dependency_tree', 'modidx_audit',
+           'find_symbol', 'dependency_snapshot', 'export_diagram', 'index_external_libs', 'lookup_external_symbol',
+           'interactive_dependency_graph', 'add_analysis_tools', 'suggest_location', 'check_before_create',
+           'detect_migrations_needed']
 
 # %% ../../nbs/11_tools/06_analysis.ipynb 6
 def analyze_dependency_order(
@@ -289,13 +302,913 @@ format: html
     }
 
 # %% ../../nbs/11_tools/06_analysis.ipynb 9
+def modidx_audit(
+    project: Optional[str] = None,
+    require_number_prefix: bool = True
+) -> Dict[str, Any]:
+    """Audit _modidx.py for duplicate exports, private symbols, and numbering.
+    
+    Parameters
+    ----------
+    project : str, optional
+        Project path or alias. Uses current project if not specified.
+    require_number_prefix : bool
+        If True, flag notebooks without numeric prefix.
+    
+    Returns
+    -------
+    Dict[str, Any]
+        Result with 'duplicates', 'private_exports', and 'numbering_issues' lists.
+    """
+    try:
+        p = resolve_selector(project)
+        modidx = load_modidx(p)
+    except Exception as e:
+        return {'ok': False, 'error': str(e)}
+    
+    syms = modidx.get("syms", {}) if isinstance(modidx, dict) else {}
+    sym_to_mods: Dict[str, List[str]] = {}
+    dup: List[Dict[str, Any]] = []
+    private: List[Dict[str, Any]] = []
+    numbering: List[Dict[str, Any]] = []
+    
+    num_re = re.compile(r"^\d{2}_.+\.ipynb$")
+    
+    for mod, entries in syms.items():
+        if not isinstance(entries, dict):
+            continue
+        for sym, meta in entries.items():
+            sym_to_mods.setdefault(sym, []).append(mod)
+            name = sym.split(".")[-1]
+            if name.startswith("_") and name not in ("__init__",):
+                private.append({"symbol": sym, "module": mod})
+            src = meta.get("source") if isinstance(meta, dict) else None
+            if src:
+                file_part = str(src).split("#", 1)[0]
+                fname = Path(file_part).name
+                if require_number_prefix and not num_re.match(fname):
+                    numbering.append({"module": mod, "file": file_part})
+    
+    for sym, mods in sym_to_mods.items():
+        if len(mods) > 1:
+            dup.append({"symbol": sym, "modules": sorted(set(mods))})
+    
+    rows = []
+    for d in dup[:100]:
+        rows.append(["duplicate", d["symbol"], ", ".join(d["modules"])])
+    for it in private[:100]:
+        rows.append(["private", it["symbol"], it["module"]])
+    for it in numbering[:100]:
+        rows.append(["unnumbered", it["module"], it["file"]])
+    
+    if rows:
+        pretty = render_table("_modidx audit", ["issue", "symbol/module", "detail"], rows)
+    else:
+        pretty = render_panel("modidx_audit", "_modidx audit passed (no duplicates, no private exports, numbering ok).")
+    
+    return {
+        "ok": not (dup or private or numbering),
+        "duplicates": dup,
+        "private_exports": private,
+        "numbering_issues": numbering,
+        "modidx_path": str(modidx_path(p)),
+        "pretty": pretty
+    }
+
+
+# %% ../../nbs/11_tools/06_analysis.ipynb 10
+def find_symbol(
+    symbol: str,
+    project: Optional[str] = None
+) -> Dict[str, Any]:
+    """Find modules/notebooks exporting a given symbol.
+    
+    Uses _modidx.py to look up where a symbol is exported from.
+    
+    Parameters
+    ----------
+    symbol : str
+        Symbol name to search for.
+    project : str, optional
+        Project path or alias. Uses current project if not specified.
+    
+    Returns
+    -------
+    Dict[str, Any]
+        Result with 'matches' list of module/source locations.
+    """
+    try:
+        p = resolve_selector(project)
+        modidx = load_modidx(p)
+    except Exception as e:
+        return {'ok': False, 'error': str(e)}
+    
+    locs = symbol_locations(modidx, symbol)
+    
+    if locs:
+        rows = [[it.get("module", ""), it.get("source", "")] for it in locs[:200]]
+        pretty = render_table(f"exports for '{symbol}'", ["module", "source"], rows)
+    else:
+        pretty = render_panel("find_symbol", f"No exports found for symbol '{symbol}' in _modidx.py")
+    
+    return {
+        "ok": bool(locs),
+        "matches": locs,
+        "modidx_path": str(modidx_path(p)),
+        "pretty": pretty
+    }
+
+
+# %% ../../nbs/11_tools/06_analysis.ipynb 11
+def dependency_snapshot(
+    project: Optional[str] = None,
+    scope: str = "internal",
+    include_unused: Optional[str] = None,
+    write_qmd: Optional[str] = None
+) -> Dict[str, Any]:
+    """Combine dependency tree with _modidx to spot gaps.
+    
+    Compares the dependency graph with _modidx.py to find:
+    - Modules in dependency tree but missing from _modidx
+    - Modules in _modidx but not referenced in dependency tree
+    
+    Parameters
+    ----------
+    project : str, optional
+        Project path or alias. Uses current project if not specified.
+    scope : str
+        'internal', 'external', or 'both' for dependency_tree scope.
+    include_unused : str, optional
+        'internal', 'external', or 'both' to include unused imports.
+    write_qmd : str, optional
+        Path to write a Quarto document with diagrams.
+    
+    Returns
+    -------
+    Dict[str, Any]
+        Result with 'missing_in_modidx' and 'unused_in_tree' lists.
+    """
+    try:
+        p = resolve_selector(project)
+        modidx = load_modidx(p)
+    except Exception as e:
+        return {'ok': False, 'error': str(e)}
+    
+    tree = dependency_tree(project=str(p), scope=scope, include_unused=include_unused, write_qmd=write_qmd)
+    if not tree.get("ok"):
+        return tree
+    
+    modidx_syms = modidx.get("syms", {}) if isinstance(modidx, dict) else {}
+    modidx_modules = set(modidx_syms.keys())
+    tree_internal = set(tree.get("nodes_internal", []))
+    
+    missing_in_modidx = sorted(tree_internal - modidx_modules)
+    unused_in_tree = sorted(modidx_modules - tree_internal)
+    
+    rows = [
+        ["internal modules (tree)", str(len(tree_internal))],
+        ["modules in _modidx", str(len(modidx_modules))],
+        ["missing in _modidx", str(len(missing_in_modidx))],
+        ["unused in tree", str(len(unused_in_tree))],
+    ]
+    pretty = render_table("dependency snapshot", ["metric", "count"], rows)
+    
+    if missing_in_modidx:
+        pretty += "\n" + render_panel("missing modules", "Missing in _modidx (export cells?):\n" + "\n".join(missing_in_modidx[:50]))
+    if unused_in_tree:
+        pretty += "\n" + render_panel("unused modules", "Modules listed in _modidx but not seen in dependency tree:\n" + "\n".join(unused_in_tree[:50]))
+    
+    return {
+        "ok": True,
+        "missing_in_modidx": missing_in_modidx,
+        "unused_in_tree": unused_in_tree,
+        "modidx_path": str(modidx_path(p)),
+        "tree": tree,
+        "pretty": pretty
+    }
+
+
+# %% ../../nbs/11_tools/06_analysis.ipynb 12
+def export_diagram(
+    project: Optional[str] = None,
+    format: str = 'svg',
+    output_path: Optional[str] = None,
+    scope: str = 'internal',
+    engine: str = 'dot'
+) -> Dict[str, Any]:
+    """Generate visual dependency graph as SVG or PNG.
+    
+    Creates a visual diagram of module dependencies. Requires graphviz
+    to be installed for rendering.
+    
+    Parameters
+    ----------
+    project : str, optional
+        Project path or alias. Uses current project if not specified.
+    format : str
+        Output format: 'svg', 'png', or 'dot' (raw DOT source).
+    output_path : str, optional
+        Path to write the output file. Defaults to 'docs/dependencies.{format}'.
+    scope : str
+        'internal', 'external', or 'both' to control which deps to show.
+    engine : str
+        Graphviz engine: 'dot', 'neato', 'fdp', 'sfdp', 'circo', 'twopi'.
+    
+    Returns
+    -------
+    Dict[str, Any]
+        Result with 'path' to generated file and 'format' used.
+    """
+    try:
+        p = resolve_selector(project)
+    except Exception as e:
+        return {'ok': False, 'error': str(e)}
+    
+    # Get dependency tree
+    tree = dependency_tree(project=str(p), scope=scope)
+    if not tree.get('ok'):
+        return tree
+    
+    dot_source = tree.get('dot', '')
+    
+    # Determine output path
+    if output_path:
+        out = p / output_path
+    else:
+        out = p / 'docs' / f'dependencies.{format}'
+    
+    out.parent.mkdir(parents=True, exist_ok=True)
+    
+    # If just DOT format, write the source directly
+    if format == 'dot':
+        out.write_text(dot_source, encoding='utf-8')
+        pretty = render_panel('export_diagram', f'DOT source written to {out.relative_to(p)}')
+        return {
+            'ok': True,
+            'path': str(out.relative_to(p)),
+            'format': format,
+            'pretty': pretty
+        }
+    
+    # Try to use graphviz for SVG/PNG
+    try:
+        import subprocess
+        
+        # Write temporary DOT file
+        dot_file = out.with_suffix('.dot')
+        dot_file.write_text(dot_source, encoding='utf-8')
+        
+        # Run graphviz
+        cmd = [engine, f'-T{format}', str(dot_file), '-o', str(out)]
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        
+        # Clean up temp file
+        dot_file.unlink()
+        
+        if result.returncode != 0:
+            return {
+                'ok': False,
+                'error': f'Graphviz failed: {result.stderr}',
+                'hint': 'Install graphviz: brew install graphviz (macOS) or apt install graphviz (Linux)'
+            }
+        
+        pretty = render_panel('export_diagram', f'{format.upper()} diagram written to {out.relative_to(p)}')
+        return {
+            'ok': True,
+            'path': str(out.relative_to(p)),
+            'format': format,
+            'pretty': pretty
+        }
+        
+    except FileNotFoundError:
+        # Graphviz not installed, fall back to DOT
+        dot_fallback = out.with_suffix('.dot')
+        dot_fallback.write_text(dot_source, encoding='utf-8')
+        return {
+            'ok': False,
+            'error': f'Graphviz ({engine}) not found. DOT source written instead.',
+            'path': str(dot_fallback.relative_to(p)),
+            'format': 'dot',
+            'hint': 'Install graphviz: brew install graphviz (macOS) or apt install graphviz (Linux)'
+        }
+    except Exception as e:
+        return {'ok': False, 'error': str(e)}
+
+# %% ../../nbs/11_tools/06_analysis.ipynb 15
+def index_external_libs(
+    project: Optional[str] = None,
+    force: bool = False
+) -> Dict[str, Any]:
+    """Index external libraries used by the project.
+    
+    Scans project notebooks for external imports (torch, transformers, etc.)
+    and generates cached _modidx.py files for documentation lookup.
+    
+    Parameters
+    ----------
+    project : str, optional
+        Project path or alias. Uses current project if not specified.
+    force : bool
+        If True, regenerate indices even if cached versions exist.
+    
+    Returns
+    -------
+    Dict[str, Any]
+        Result dict with:
+        - ok: bool - Success status
+        - packages: List[str] - Packages found in project
+        - indexed: List[str] - Successfully indexed packages
+        - failed: List[str] - Packages that failed to index
+        - pretty: str - Formatted output
+    """
+    try:
+        p = resolve_selector(project)
+    except Exception as e:
+        return {'ok': False, 'error': str(e)}
+    
+    # Get external imports from the project
+    external_packages = scan_project_imports(p)
+    
+    # Index each package
+    result = _index_project_externals(p, force=force)
+    
+    # Build pretty output
+    if result.get('indexed') or result.get('failed'):
+        rows = []
+        for pkg in result.get('indexed', []):
+            rows.append([pkg, '✓ indexed', ''])
+        for pkg, err in result.get('failed', {}).items():
+            rows.append([pkg, '✗ failed', str(err)[:50]])
+        pretty = render_table(f"index_external_libs: {len(result.get('indexed', []))} indexed",
+                              ['package', 'status', 'error'], rows)
+    else:
+        pretty = render_panel('index_external_libs', 'No external packages found to index.')
+    
+    return {
+        'ok': True,
+        'packages': list(external_packages),
+        'indexed': result.get('indexed', []),
+        'failed': result.get('failed', {}),
+        'pretty': pretty
+    }
+
+# %% ../../nbs/11_tools/06_analysis.ipynb 17
+def lookup_external_symbol(
+    symbol: str,
+    packages: Optional[List[str]] = None,
+    project: Optional[str] = None
+) -> Dict[str, Any]:
+    """Look up documentation for an external symbol.
+    
+    Searches cached package indices to find documentation links
+    and source file locations for symbols from external libraries.
+    
+    Parameters
+    ----------
+    symbol : str
+        The symbol name to look up (e.g., 'torch.nn.Module').
+    packages : List[str], optional
+        Specific packages to search in. If not provided, searches
+        all indexed packages from the project.
+    project : str, optional
+        Project path or alias. Used to determine which packages to search.
+    
+    Returns
+    -------
+    Dict[str, Any]
+        Result dict with:
+        - ok: bool - Success status
+        - symbol: str - The searched symbol
+        - found: bool - Whether the symbol was found
+        - doc_url: str - Documentation URL (if found)
+        - source_file: str - Source file location (if found)
+        - package: str - Package containing the symbol
+        - pretty: str - Formatted output
+    """
+    # Get project packages if not specified
+    if packages is None and project is not None:
+        try:
+            p = resolve_selector(project)
+            packages = list(scan_project_imports(p))
+        except Exception:
+            packages = []
+    
+    result = _lookup_symbol(symbol, packages)
+    
+    if result:
+        pretty = render_panel(
+            f"lookup_external_symbol: {symbol}",
+            f"Package: {result.get('package', 'unknown')}\n"
+            f"Doc URL: {result.get('doc_url', 'N/A')}\n"
+            f"Source: {result.get('source_file', 'N/A')}"
+        )
+        return {
+            'ok': True,
+            'symbol': symbol,
+            'found': True,
+            **result,
+            'pretty': pretty
+        }
+    else:
+        pretty = render_panel('lookup_external_symbol', f"Symbol '{symbol}' not found in indexed packages.")
+        return {
+            'ok': True,
+            'symbol': symbol,
+            'found': False,
+            'pretty': pretty
+        }
+
+# %% ../../nbs/11_tools/06_analysis.ipynb 19
+def interactive_dependency_graph(
+    project: Optional[str] = None,
+    output_path: Optional[str] = None,
+    include_duplicates: bool = True,
+    similarity_threshold: float = 0.8,
+    open_browser: bool = True
+) -> Dict[str, Any]:
+    """Generate an interactive hierarchical dependency graph.
+    
+    Creates a Cytoscape.js visualization showing:
+    - Module level (top): Package modules as containers
+    - Notebook level (middle): Notebooks within each module
+    - Symbol level (bottom): Functions, classes, constants within notebooks
+    
+    Edges show:
+    - Import dependencies (A supports B if B imports from A)
+    - Code duplication (exact, similar, suspected)
+    
+    Parameters
+    ----------
+    project : str, optional
+        Project path or alias. Uses current project if not specified.
+    output_path : str, optional
+        Output HTML path. Defaults to project/dep_graph.html.
+    include_duplicates : bool
+        Whether to detect and show code duplications.
+    similarity_threshold : float
+        Minimum similarity for 'similar' duplicates (0.5-1.0).
+    open_browser : bool
+        Whether to open the graph in a browser.
+    
+    Returns
+    -------
+    Dict[str, Any]
+        Result dict with:
+        - ok: bool - Success status
+        - output_path: str - Path to generated HTML file
+        - stats: Dict - Graph statistics (modules, notebooks, symbols, edges)
+        - pretty: str - Formatted output summary
+    """
+    try:
+        result = _generate_interactive_graph(
+            project=project,
+            output_path=output_path,
+            include_duplicates=include_duplicates,
+            similarity_threshold=similarity_threshold
+        )
+        
+        if open_browser and result.get('ok'):
+            import webbrowser
+            webbrowser.open(f"file://{result['output_path']}")
+        
+        stats = result.get('stats', {})
+        dup_info = stats.get('duplicates', {})
+        dup_summary = ', '.join(f"{k.replace('duplicate_', '')}: {v}" for k, v in dup_info.items()) or 'none'
+        
+        pretty = render_panel(
+            'interactive_dependency_graph',
+            f"Generated: {result.get('output_path')}\n\n"
+            f"Modules: {stats.get('modules', 0)}\n"
+            f"Notebooks: {stats.get('notebooks', 0)}\n"
+            f"Symbols: {stats.get('symbols', 0)}\n"
+            f"Import edges: {stats.get('import_edges', 0)}\n"
+            f"Duplicates: {dup_summary}"
+        )
+        
+        return {**result, 'pretty': pretty}
+        
+    except Exception as e:
+        return {'ok': False, 'error': str(e)}
+
+# %% ../../nbs/11_tools/06_analysis.ipynb 21
+# Tool annotation definitions for analysis tools
+ANALYSIS_TOOL_ANNOTATIONS = {
+    'analyze_dependency_order': ToolAnnotations(
+        title="Analyze Dependency Order",
+        readOnlyHint=False,
+        idempotentHint=True,
+        openWorldHint=False
+    ),
+    'dependency_tree': ToolAnnotations(
+        title="Dependency Tree",
+        readOnlyHint=True,
+        idempotentHint=True,
+        openWorldHint=False
+    ),
+    'modidx_audit': ToolAnnotations(
+        title="Modidx Audit",
+        readOnlyHint=True,
+        idempotentHint=True,
+        openWorldHint=False
+    ),
+    'find_symbol': ToolAnnotations(
+        title="Find Symbol",
+        readOnlyHint=True,
+        idempotentHint=True,
+        openWorldHint=False
+    ),
+    'dependency_snapshot': ToolAnnotations(
+        title="Dependency Snapshot",
+        readOnlyHint=True,
+        idempotentHint=True,
+        openWorldHint=False
+    ),
+    'export_diagram': ToolAnnotations(
+        title="Export Diagram",
+        readOnlyHint=False,
+        idempotentHint=True,
+        openWorldHint=False
+    ),
+    'index_external_libs': ToolAnnotations(
+        title="Index External Libs",
+        readOnlyHint=False,
+        idempotentHint=True,
+        openWorldHint=True
+    ),
+    'lookup_external_symbol': ToolAnnotations(
+        title="Lookup External Symbol",
+        readOnlyHint=True,
+        idempotentHint=True,
+        openWorldHint=True
+    ),
+    'interactive_dependency_graph': ToolAnnotations(
+        title="Interactive Dependency Graph",
+        readOnlyHint=False,
+        idempotentHint=True,
+        openWorldHint=False
+    ),
+    'suggest_location': ToolAnnotations(
+        title="Suggest Location",
+        readOnlyHint=True,
+        idempotentHint=True,
+        openWorldHint=False
+    ),
+    'check_before_create': ToolAnnotations(
+        title="Check Before Create",
+        readOnlyHint=True,
+        idempotentHint=True,
+        openWorldHint=False
+    ),
+    'detect_migrations_needed': ToolAnnotations(
+        title="Detect Migrations Needed",
+        readOnlyHint=True,
+        idempotentHint=True,
+        openWorldHint=False
+    ),
+}
+
 def add_analysis_tools(mcp: FastMCP) -> None:
-    """Attach dependency analysis tools to the MCP server.
+    """Register all analysis tools with the MCP server.
     
     Parameters
     ----------
     mcp : FastMCP
-        The MCP server instance.
+        The MCP server instance to register tools with.
     """
-    mcp.add_tool(analyze_dependency_order)
-    mcp.add_tool(dependency_tree)
+    tools = [
+        ('analyze_dependency_order', analyze_dependency_order),
+        ('dependency_tree', dependency_tree),
+        ('modidx_audit', modidx_audit),
+        ('find_symbol', find_symbol),
+        ('dependency_snapshot', dependency_snapshot),
+        ('export_diagram', export_diagram),
+        ('index_external_libs', index_external_libs),
+        ('lookup_external_symbol', lookup_external_symbol),
+        ('interactive_dependency_graph', interactive_dependency_graph),
+        ('suggest_location', suggest_location),
+        ('check_before_create', check_before_create),
+        ('detect_migrations_needed', detect_migrations_needed),
+    ]
+    
+    for name, func in tools:
+        annotations = ANALYSIS_TOOL_ANNOTATIONS.get(name)
+        mcp.tool(name=name, annotations=annotations)(func)
+
+# %% ../../nbs/11_tools/06_analysis.ipynb 24
+# Canonical locations for different types of utilities
+UTILS_REGISTRY = {
+    'path_functions': '00_utils/08_paths.ipynb',
+    'io_functions': '00_utils/11_io.ipynb',
+    'type_definitions': '00_utils/01_types.ipynb',
+    'regex_patterns': '00_utils/05_re.ipynb',
+    'config_helpers': '00_utils/04_config.ipynb',
+    'subprocess_helpers': '00_utils/10_subprocess.ipynb',
+    'notebook_helpers': '00_utils/07_nb.ipynb',
+}
+"""Registry of canonical locations for utility types."""
+
+# %% ../../nbs/11_tools/06_analysis.ipynb 25
+def suggest_location(
+    code: str,
+    project: Optional[str] = None
+) -> Dict[str, Any]:
+    """Suggest canonical location for code based on its content.
+    
+    Analyzes the code pattern to recommend where it should live
+    in the project structure (e.g., path functions → 00_utils/08_paths.ipynb).
+    
+    Parameters
+    ----------
+    code : str
+        The code snippet to analyze.
+    project : str, optional
+        Project path or alias.
+    
+    Returns
+    -------
+    Dict[str, Any]
+        Result with 'suggested_location' and 'reason'.
+    """
+    suggestions: List[Dict[str, Any]] = []
+    
+    # Analyze code patterns
+    code_lower = code.lower()
+    
+    # Path functions
+    if ('def get_' in code and 'path' in code_lower) or ('Path' in code and 'home()' in code):
+        suggestions.append({
+            'location': UTILS_REGISTRY['path_functions'],
+            'reason': 'Function appears to be a path utility',
+            'confidence': 0.9
+        })
+    
+    # I/O functions
+    if any(pattern in code for pattern in ['def read_', 'def write_', 'def load_', 'def save_']):
+        if 'json' in code_lower or 'toml' in code_lower or 'yaml' in code_lower:
+            suggestions.append({
+                'location': UTILS_REGISTRY['io_functions'],
+                'reason': 'Function appears to be an I/O utility',
+                'confidence': 0.9
+            })
+    
+    # Type definitions
+    if '@dataclass' in code or ('class ' in code and 'def ' not in code):
+        suggestions.append({
+            'location': UTILS_REGISTRY['type_definitions'],
+            'reason': 'Appears to be a type/dataclass definition',
+            'confidence': 0.8
+        })
+    
+    # Regex patterns
+    if 're.compile' in code or 'PATTERN' in code:
+        suggestions.append({
+            'location': UTILS_REGISTRY['regex_patterns'],
+            'reason': 'Contains regex pattern definition',
+            'confidence': 0.85
+        })
+    
+    # Subprocess helpers
+    if 'subprocess' in code or 'run_command' in code or 'Popen' in code:
+        suggestions.append({
+            'location': UTILS_REGISTRY['subprocess_helpers'],
+            'reason': 'Contains subprocess/command execution',
+            'confidence': 0.85
+        })
+    
+    # Notebook helpers
+    if 'nbformat' in code or 'cell' in code_lower and 'notebook' in code_lower:
+        suggestions.append({
+            'location': UTILS_REGISTRY['notebook_helpers'],
+            'reason': 'Contains notebook manipulation code',
+            'confidence': 0.8
+        })
+    
+    if suggestions:
+        # Sort by confidence
+        suggestions.sort(key=lambda x: x['confidence'], reverse=True)
+        best = suggestions[0]
+        pretty = render_panel(
+            'suggest_location',
+            f"Suggested location: {best['location']}\n"
+            f"Reason: {best['reason']}\n"
+            f"Confidence: {best['confidence']:.0%}"
+        )
+    else:
+        pretty = render_panel('suggest_location', 'No specific location suggested. Create a new module.')
+    
+    return {
+        'ok': True,
+        'suggestions': suggestions,
+        'best': suggestions[0] if suggestions else None,
+        'registry': UTILS_REGISTRY,
+        'pretty': pretty
+    }
+
+# %% ../../nbs/11_tools/06_analysis.ipynb 26
+def check_before_create(
+    proposed_path: str,
+    proposed_exports: Optional[List[str]] = None,
+    project: Optional[str] = None
+) -> Dict[str, Any]:
+    """Check if proposed exports already exist or belong elsewhere.
+    
+    Before creating a new notebook, checks:
+    - If any proposed symbols already exist in _modidx
+    - If the proposed location overlaps with existing modules
+    - If utilities should go in 00_utils/ instead
+    
+    Parameters
+    ----------
+    proposed_path : str
+        Proposed notebook path (e.g., '50_install/02_paths.ipynb').
+    proposed_exports : List[str], optional
+        List of symbol names to be exported.
+    project : str, optional
+        Project path or alias.
+    
+    Returns
+    -------
+    Dict[str, Any]
+        Result with 'warnings' and 'suggestions' for each proposed export.
+    """
+    try:
+        p = resolve_selector(project)
+        modidx = load_modidx(p)
+    except Exception as e:
+        return {'ok': False, 'error': str(e)}
+    
+    warnings: List[Dict[str, Any]] = []
+    suggestions: List[Dict[str, Any]] = []
+    
+    proposed_exports = proposed_exports or []
+    
+    # Check each proposed export
+    for export_name in proposed_exports:
+        # Check if already exists
+        locs = symbol_locations(modidx, export_name)
+        if locs:
+            warnings.append({
+                'symbol': export_name,
+                'issue': 'already_exists',
+                'locations': locs,
+                'action': f"Import from existing location instead of redefining"
+            })
+        
+        # Check if it's a utility-like name that should go in utils
+        name_lower = export_name.lower()
+        if name_lower.startswith('get_') and 'path' in name_lower:
+            suggestions.append({
+                'symbol': export_name,
+                'issue': 'belongs_in_utils',
+                'suggested_location': UTILS_REGISTRY['path_functions'],
+                'action': f"Add to {UTILS_REGISTRY['path_functions']} instead"
+            })
+        elif name_lower.startswith(('read_', 'write_', 'load_', 'save_')):
+            suggestions.append({
+                'symbol': export_name,
+                'issue': 'belongs_in_utils',
+                'suggested_location': UTILS_REGISTRY['io_functions'],
+                'action': f"Add to {UTILS_REGISTRY['io_functions']} instead"
+            })
+    
+    # Check if proposed path overlaps with existing
+    proposed_parts = proposed_path.replace('.ipynb', '').split('/')
+    if len(proposed_parts) >= 2:
+        # Check for similar module structure
+        for nb in iter_notebooks(p):
+            nb_parts = str(nb.relative_to(nbs_dir(p))).replace('.ipynb', '').split('/')
+            if len(nb_parts) >= 2 and proposed_parts[0] == nb_parts[0]:
+                if proposed_parts[-1] in nb_parts[-1] or nb_parts[-1] in proposed_parts[-1]:
+                    warnings.append({
+                        'issue': 'similar_module_exists',
+                        'proposed': proposed_path,
+                        'existing': str(nb.relative_to(p)),
+                        'action': 'Consider extending existing module instead'
+                    })
+                    break
+    
+    # Build pretty output
+    if warnings or suggestions:
+        rows = []
+        for w in warnings:
+            rows.append(['warning', w.get('symbol', w.get('proposed', '')), w.get('issue', ''), w.get('action', '')])
+        for s in suggestions:
+            rows.append(['suggestion', s['symbol'], s['issue'], s['action']])
+        pretty = render_table('check_before_create', ['type', 'symbol', 'issue', 'action'], rows)
+    else:
+        pretty = render_panel('check_before_create', f"No conflicts found. OK to create {proposed_path}")
+    
+    return {
+        'ok': len(warnings) == 0,
+        'proposed_path': proposed_path,
+        'warnings': warnings,
+        'suggestions': suggestions,
+        'pretty': pretty
+    }
+
+# %% ../../nbs/11_tools/06_analysis.ipynb 27
+def detect_migrations_needed(
+    project: Optional[str] = None
+) -> Dict[str, Any]:
+    """Find overlapping modules that should be consolidated.
+    
+    Detects:
+    - Symbols exported from multiple notebooks
+    - Modules with similar names in different locations
+    - Deprecated modules that still have exports
+    
+    Parameters
+    ----------
+    project : str, optional
+        Project path or alias.
+    
+    Returns
+    -------
+    Dict[str, Any]
+        Result with 'overlaps', 'similar_modules', and 'recommendations'.
+    """
+    try:
+        p = resolve_selector(project)
+        modidx = load_modidx(p)
+    except Exception as e:
+        return {'ok': False, 'error': str(e)}
+    
+    s = settings_dict(p)
+    lib = s.get('lib_name') or 'pkg'
+    
+    # Build export map: symbol -> list of (module, source)
+    exports_by_symbol: Dict[str, List[Dict[str, Any]]] = {}
+    exports_by_module: Dict[str, Set[str]] = {}
+    
+    syms = modidx.get("syms", {}) if isinstance(modidx, dict) else {}
+    
+    for mod, entries in syms.items():
+        if not isinstance(entries, dict):
+            continue
+        exports_by_module[mod] = set()
+        for sym, meta in entries.items():
+            name = sym.split(".")[-1]
+            if name.startswith("_"):
+                continue
+            exports_by_symbol.setdefault(name, []).append({
+                'module': mod,
+                'source': meta.get('source') if isinstance(meta, dict) else None
+            })
+            exports_by_module[mod].add(name)
+    
+    # Find symbol overlaps
+    overlaps: List[Dict[str, Any]] = []
+    for name, locs in exports_by_symbol.items():
+        if len(locs) > 1:
+            modules = [loc['module'] for loc in locs]
+            overlaps.append({
+                'symbol': name,
+                'modules': modules,
+                'recommendation': f"Consolidate '{name}' into one module and re-export from others"
+            })
+    
+    # Find similar module names
+    similar_modules: List[Dict[str, Any]] = []
+    module_names = list(exports_by_module.keys())
+    for i, m1 in enumerate(module_names):
+        m1_base = m1.split('.')[-1]
+        for m2 in module_names[i+1:]:
+            m2_base = m2.split('.')[-1]
+            # Check for similar base names
+            if m1_base == m2_base and m1 != m2:
+                shared = exports_by_module[m1] & exports_by_module[m2]
+                if shared:
+                    similar_modules.append({
+                        'modules': [m1, m2],
+                        'shared_symbols': list(shared),
+                        'recommendation': f"Modules have same base name and share symbols - consider merging"
+                    })
+    
+    # Generate recommendations
+    recommendations: List[str] = []
+    if overlaps:
+        recommendations.append(f"Found {len(overlaps)} symbols exported from multiple modules")
+    if similar_modules:
+        recommendations.append(f"Found {len(similar_modules)} pairs of similar modules")
+    if not recommendations:
+        recommendations.append("No migrations needed - exports are well organized")
+    
+    # Build pretty output
+    rows = []
+    for o in overlaps[:50]:
+        rows.append(['overlap', o['symbol'], ', '.join(o['modules'][:3])])
+    for sm in similar_modules[:20]:
+        rows.append(['similar', ', '.join(sm['modules']), ', '.join(sm['shared_symbols'][:3])])
+    
+    if rows:
+        pretty = render_table('detect_migrations_needed', ['type', 'item', 'detail'], rows)
+    else:
+        pretty = render_panel('detect_migrations_needed', 'No migrations needed - exports are well organized.')
+    
+    return {
+        'ok': len(overlaps) == 0 and len(similar_modules) == 0,
+        'overlaps': overlaps,
+        'similar_modules': similar_modules,
+        'recommendations': recommendations,
+        'pretty': pretty
+    }

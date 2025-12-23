@@ -8,22 +8,188 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import re
 import ast
+import subprocess
 from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
+from mcp.types import ToolAnnotations
 
 from ..utils.re import TODO_CODE_PATTERN, TODO_MD_PATTERN, BUG_PATTERN
 from nbdev_mcp.utils.paths import (
     nbs_dir, settings_dict, resolve_selector, iter_notebooks,
-    read_nb, write_nb, abs_module_for_nb,
+    read_nb, write_nb, abs_module_for_nb, tutorials_dir,
 )
 from ..utils.nb import join_source, find_default_exp, has_export
 from ..utils.rich import render_table, render_panel
 
 # %% auto 0
-__all__ = ['generate_pytests', 'scaffold_test_utils', 'generate_stubs', 'aggregate_todos', 'aggregate_bugs', 'add_tests_tools']
+__all__ = ['TESTS_TOOL_ANNOTATIONS', 'run_tutorials', 'scan_notebook_errors', 'generate_pytests', 'scaffold_test_utils',
+           'generate_stubs', 'aggregate_todos', 'aggregate_bugs', 'coverage_report', 'add_tests_tools']
 
 # %% ../../nbs/11_tools/07_tests.ipynb 6
+def run_tutorials(
+    project: Optional[str] = None,
+    timeout: int = 600,
+    allow_errors: bool = False
+) -> Dict[str, Any]:
+    """Execute tutorial notebooks to verify they run without errors.
+    
+    Runs notebooks in tutorials/ directory using nbconvert or execnb.
+    
+    Parameters
+    ----------
+    project : str, optional
+        Project path or alias. Uses current project if not specified.
+    timeout : int
+        Timeout in seconds per notebook (default: 600).
+    allow_errors : bool
+        If True, continue even if a notebook fails.
+    
+    Returns
+    -------
+    Dict[str, Any]
+        Result with 'results' list of per-notebook outcomes.
+    """
+    try:
+        p = resolve_selector(project)
+    except Exception as e:
+        return {'ok': False, 'error': str(e)}
+    
+    tuts = tutorials_dir(p)
+    if not tuts.exists():
+        return {'ok': True, 'results': [], 'message': 'No tutorials/ directory found'}
+    
+    results: List[Dict[str, Any]] = []
+    failed = 0
+    
+    for nb in sorted(tuts.glob('*.ipynb')):
+        if '.ipynb_checkpoints' in str(nb):
+            continue
+        
+        try:
+            # Try using nbconvert to execute
+            cmd = [
+                'jupyter', 'nbconvert', '--to', 'notebook',
+                '--execute', '--inplace',
+                '--ExecutePreprocessor.timeout=' + str(timeout),
+                str(nb)
+            ]
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout + 60)
+            ok = result.returncode == 0
+            if not ok:
+                failed += 1
+            results.append({
+                'notebook': str(nb.relative_to(p)),
+                'ok': ok,
+                'returncode': result.returncode,
+                'stderr': result.stderr[:1000] if result.stderr else None
+            })
+        except subprocess.TimeoutExpired:
+            failed += 1
+            results.append({
+                'notebook': str(nb.relative_to(p)),
+                'ok': False,
+                'error': f'Timeout after {timeout}s'
+            })
+        except FileNotFoundError:
+            # jupyter not available
+            return {'ok': False, 'error': 'jupyter nbconvert not found. Install jupyter to run tutorials.'}
+        
+        if not allow_errors and failed > 0:
+            break
+    
+    rows = [[r['notebook'], '✓' if r['ok'] else '✗', r.get('error') or r.get('stderr', '')[:50] or '']
+            for r in results]
+    pretty = render_table('tutorial results', ['notebook', 'ok', 'notes'], rows)
+    
+    return {
+        'ok': failed == 0,
+        'results': results,
+        'failed': failed,
+        'total': len(results),
+        'pretty': pretty
+    }
+
+
+# %% ../../nbs/11_tools/07_tests.ipynb 7
+def scan_notebook_errors(
+    project: Optional[str] = None,
+    include_nbs: bool = True,
+    include_tutorials: bool = True,
+    max_trace_chars: int = 1200
+) -> Dict[str, Any]:
+    """Scan notebooks for existing error outputs without executing them.
+    
+    Parameters
+    ----------
+    project : str, optional
+        Project path or alias. Uses current project if not specified.
+    include_nbs : bool
+        If True, scan notebooks in nbs/ directory.
+    include_tutorials : bool
+        If True, scan notebooks in tutorials/ directory.
+    max_trace_chars : int
+        Maximum characters to include from traceback (default: 1200).
+    
+    Returns
+    -------
+    Dict[str, Any]
+        Result with 'errors' list of notebooks with error outputs.
+    """
+    try:
+        p = resolve_selector(project)
+    except Exception as e:
+        return {'ok': False, 'error': str(e)}
+    
+    errors: List[Dict[str, Any]] = []
+    
+    def scan_dir(d: Path) -> None:
+        if not d.exists():
+            return
+        for nb in sorted(d.rglob('*.ipynb')):
+            if '.ipynb_checkpoints' in str(nb):
+                continue
+            try:
+                data = read_nb(nb)
+            except Exception:
+                continue
+            
+            for i, cell in enumerate(data.get('cells', [])):
+                if cell.get('cell_type') != 'code':
+                    continue
+                for out in cell.get('outputs', []):
+                    if out.get('output_type') == 'error':
+                        ename = out.get('ename', 'Error')
+                        evalue = out.get('evalue', '')
+                        trace = '\n'.join(out.get('traceback', []))
+                        errors.append({
+                            'notebook': str(nb.relative_to(p)),
+                            'cell': i,
+                            'ename': ename,
+                            'evalue': evalue[:200],
+                            'traceback': trace[:max_trace_chars] if trace else None
+                        })
+    
+    if include_nbs:
+        scan_dir(nbs_dir(p))
+    if include_tutorials:
+        scan_dir(tutorials_dir(p))
+    
+    if errors:
+        rows = [[e['notebook'], str(e['cell']), e['ename'], e['evalue'][:50]] for e in errors[:100]]
+        pretty = render_table('notebook errors', ['notebook', 'cell', 'type', 'message'], rows)
+    else:
+        pretty = render_panel('scan_notebook_errors', 'No error outputs found in notebooks.')
+    
+    return {
+        'ok': len(errors) == 0,
+        'errors': errors,
+        'total': len(errors),
+        'pretty': pretty
+    }
+
+
+# %% ../../nbs/11_tools/07_tests.ipynb 9
 def generate_pytests(
     project: Optional[str] = None,
     dry_run: bool = False,
@@ -124,7 +290,7 @@ def generate_pytests(
         'pretty': pretty
     }
 
-# %% ../../nbs/11_tools/07_tests.ipynb 7
+# %% ../../nbs/11_tools/07_tests.ipynb 10
 def scaffold_test_utils(project: Optional[str] = None) -> Dict[str, Any]:
     """Create the standard nbs/99_tests/00_utils.ipynb notebook.
     
@@ -190,7 +356,7 @@ def scaffold_test_utils(project: Optional[str] = None) -> Dict[str, Any]:
     write_nb(nb_path, nb)
     return {'ok': True, 'created': str(nb_path.relative_to(p))}
 
-# %% ../../nbs/11_tools/07_tests.ipynb 9
+# %% ../../nbs/11_tools/07_tests.ipynb 12
 def generate_stubs(
     project: Optional[str] = None,
     out_path: Optional[str] = None,
@@ -282,7 +448,7 @@ def generate_stubs(
     
     return {'ok': True, 'out_file': str(out.relative_to(p)), 'pretty': pretty}
 
-# %% ../../nbs/11_tools/07_tests.ipynb 11
+# %% ../../nbs/11_tools/07_tests.ipynb 14
 def aggregate_todos(
     project: Optional[str] = None,
     out_file: str = 'TODOs.md'
@@ -342,7 +508,7 @@ def aggregate_todos(
     
     return {'ok': True, 'count': len(rows), 'out_file': str(outp.relative_to(p))}
 
-# %% ../../nbs/11_tools/07_tests.ipynb 12
+# %% ../../nbs/11_tools/07_tests.ipynb 15
 def aggregate_bugs(
     project: Optional[str] = None,
     out_file: str = 'BUGs.md'
@@ -393,17 +559,196 @@ def aggregate_bugs(
     
     return {'ok': True, 'count': len(rows), 'out_file': str(outp.relative_to(p))}
 
-# %% ../../nbs/11_tools/07_tests.ipynb 14
+# %% ../../nbs/11_tools/07_tests.ipynb 16
+def coverage_report(
+    project: Optional[str] = None,
+    include_untested: bool = True
+) -> Dict[str, Any]:
+    """Generate test coverage report per notebook.
+    
+    Analyzes which exported functions/classes have associated test
+    cells (cells containing assert statements that reference them).
+    
+    Parameters
+    ----------
+    project : str, optional
+        Project path or alias. Uses current project if not specified.
+    include_untested : bool
+        If True, list functions/classes without tests.
+    
+    Returns
+    -------
+    Dict[str, Any]
+        Result with 'coverage' per notebook and 'untested' symbols.
+    """
+    try:
+        p = resolve_selector(project)
+    except Exception as e:
+        return {'ok': False, 'error': str(e)}
+    
+    s = settings_dict(p)
+    lib = s.get('lib_name') or 'pkg'
+    
+    # Track exported symbols per notebook
+    exports: Dict[str, List[str]] = {}  # notebook -> [symbol names]
+    tested: Dict[str, set] = {}  # notebook -> set of tested symbols
+    
+    for nb in iter_notebooks(p):
+        data = read_nb(nb)
+        rel = str(nb.relative_to(p))
+        exports[rel] = []
+        tested[rel] = set()
+        
+        for i, cell in enumerate(data.get('cells', [])):
+            if cell.get('cell_type') != 'code':
+                continue
+            src = join_source(cell.get('source', []))
+            
+            # Find exported symbols
+            if has_export(src):
+                try:
+                    tree = ast.parse(src)
+                    for node in ast.walk(tree):
+                        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                            exports[rel].append(node.name)
+                        elif isinstance(node, ast.ClassDef):
+                            exports[rel].append(node.name)
+                except SyntaxError:
+                    pass
+            
+            # Find test cells (cells with assert)
+            if 'assert' in src:
+                # Track which symbols are referenced in this test cell
+                try:
+                    tree = ast.parse(src)
+                    for node in ast.walk(tree):
+                        if isinstance(node, ast.Name):
+                            tested[rel].add(node.id)
+                        elif isinstance(node, ast.Call):
+                            if isinstance(node.func, ast.Name):
+                                tested[rel].add(node.func.id)
+                            elif isinstance(node.func, ast.Attribute):
+                                tested[rel].add(node.func.attr)
+                except SyntaxError:
+                    pass
+    
+    # Calculate coverage
+    coverage: List[Dict[str, Any]] = []
+    untested_list: List[Dict[str, str]] = []
+    total_exports = 0
+    total_tested = 0
+    
+    for nb, syms in exports.items():
+        if not syms:
+            continue
+        
+        nb_tested = [s for s in syms if s in tested[nb]]
+        nb_untested = [s for s in syms if s not in tested[nb]]
+        pct = (len(nb_tested) / len(syms) * 100) if syms else 0
+        
+        coverage.append({
+            'notebook': nb,
+            'exports': len(syms),
+            'tested': len(nb_tested),
+            'coverage': f'{pct:.0f}%'
+        })
+        
+        total_exports += len(syms)
+        total_tested += len(nb_tested)
+        
+        if include_untested:
+            for s in nb_untested:
+                untested_list.append({'notebook': nb, 'symbol': s})
+    
+    overall_pct = (total_tested / total_exports * 100) if total_exports else 0
+    
+    # Build output
+    rows = [[c['notebook'], str(c['exports']), str(c['tested']), c['coverage']]
+            for c in coverage]
+    pretty = render_table('coverage report', ['notebook', 'exports', 'tested', 'coverage'], rows)
+    pretty += f'\n\nOverall: {total_tested}/{total_exports} ({overall_pct:.0f}%)'
+    
+    if include_untested and untested_list:
+        pretty += '\n\n' + render_panel('untested symbols', '\n'.join(
+            f"- {u['notebook']}: {u['symbol']}" for u in untested_list[:50]
+        ))
+    
+    return {
+        'ok': True,
+        'coverage': coverage,
+        'untested': untested_list if include_untested else [],
+        'total_exports': total_exports,
+        'total_tested': total_tested,
+        'overall_coverage': f'{overall_pct:.0f}%',
+        'pretty': pretty
+    }
+
+# %% ../../nbs/11_tools/07_tests.ipynb 18
+# Tool annotation definitions for test tools
+TESTS_TOOL_ANNOTATIONS = {
+    'run_tutorials': ToolAnnotations(
+        title="Run Tutorials",
+        readOnlyHint=True,
+        idempotentHint=True,
+        openWorldHint=False
+    ),
+    'scan_notebook_errors': ToolAnnotations(
+        title="Scan Notebook Errors",
+        readOnlyHint=True,
+        idempotentHint=True,
+        openWorldHint=False
+    ),
+    'generate_pytests': ToolAnnotations(
+        title="Generate Pytests",
+        readOnlyHint=False,  # Writes test files
+        idempotentHint=True,
+        openWorldHint=False
+    ),
+    'scaffold_test_utils': ToolAnnotations(
+        title="Scaffold Test Utils",
+        readOnlyHint=False,  # Creates notebook
+        idempotentHint=True,
+        openWorldHint=False
+    ),
+    'generate_stubs': ToolAnnotations(
+        title="Generate Stubs",
+        readOnlyHint=False,  # Writes .pyi files
+        idempotentHint=True,
+        openWorldHint=False
+    ),
+    'aggregate_todos': ToolAnnotations(
+        title="Aggregate TODOs",
+        readOnlyHint=False,  # Writes TODOs.md
+        idempotentHint=True,
+        openWorldHint=False
+    ),
+    'aggregate_bugs': ToolAnnotations(
+        title="Aggregate BUGs",
+        readOnlyHint=False,  # Writes BUGs.md
+        idempotentHint=True,
+        openWorldHint=False
+    ),
+    'coverage_report': ToolAnnotations(
+        title="Coverage Report",
+        readOnlyHint=True,
+        idempotentHint=True,
+        openWorldHint=False
+    ),
+}
+
 def add_tests_tools(mcp: FastMCP) -> None:
-    """Attach generation tools to the MCP server.
+    """Attach testing and generation tools to the MCP server with annotations.
     
     Parameters
     ----------
     mcp : FastMCP
         The MCP server instance.
     """
-    mcp.add_tool(generate_pytests)
-    mcp.add_tool(scaffold_test_utils)
-    mcp.add_tool(generate_stubs)
-    mcp.add_tool(aggregate_todos)
-    mcp.add_tool(aggregate_bugs)
+    mcp.add_tool(run_tutorials, annotations=TESTS_TOOL_ANNOTATIONS['run_tutorials'])
+    mcp.add_tool(scan_notebook_errors, annotations=TESTS_TOOL_ANNOTATIONS['scan_notebook_errors'])
+    mcp.add_tool(generate_pytests, annotations=TESTS_TOOL_ANNOTATIONS['generate_pytests'])
+    mcp.add_tool(scaffold_test_utils, annotations=TESTS_TOOL_ANNOTATIONS['scaffold_test_utils'])
+    mcp.add_tool(generate_stubs, annotations=TESTS_TOOL_ANNOTATIONS['generate_stubs'])
+    mcp.add_tool(aggregate_todos, annotations=TESTS_TOOL_ANNOTATIONS['aggregate_todos'])
+    mcp.add_tool(aggregate_bugs, annotations=TESTS_TOOL_ANNOTATIONS['aggregate_bugs'])
+    mcp.add_tool(coverage_report, annotations=TESTS_TOOL_ANNOTATIONS['coverage_report'])

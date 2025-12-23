@@ -35,31 +35,76 @@ class TestSetProject:
 class TestCurrentProject:
     """Tests for current_project function."""
 
-    def test_current_project_no_project(self):
-        """current_project raises when no project selected."""
+    def test_current_project_no_project(self, tmp_path):
+        """current_project raises when cwd is not nbdev project."""
+        import os
         import nbdev_mcp.utils.config
+        import nbdev_mcp.utils.paths
+
         old_project = nbdev_mcp.utils.config.CURRENT_PROJECT
+        old_paths_project = nbdev_mcp.utils.paths.CURRENT_PROJECT
+        original_cwd = os.getcwd()
+
         nbdev_mcp.utils.config.CURRENT_PROJECT = None
+        nbdev_mcp.utils.paths.CURRENT_PROJECT = None
+
         try:
+            os.chdir(tmp_path)
             with pytest.raises(RuntimeError):
                 current_project()
         finally:
+            os.chdir(original_cwd)
             nbdev_mcp.utils.config.CURRENT_PROJECT = old_project
+            nbdev_mcp.utils.paths.CURRENT_PROJECT = old_paths_project
+
+    def test_current_project_defaults_to_cwd(self, project_root):
+        """current_project uses cwd if it's an nbdev project."""
+        import os
+        import nbdev_mcp.utils.config
+        import nbdev_mcp.utils.paths
+
+        old_project = nbdev_mcp.utils.config.CURRENT_PROJECT
+        old_paths_project = nbdev_mcp.utils.paths.CURRENT_PROJECT
+        original_cwd = os.getcwd()
+
+        nbdev_mcp.utils.config.CURRENT_PROJECT = None
+        nbdev_mcp.utils.paths.CURRENT_PROJECT = None
+
+        try:
+            os.chdir(project_root)
+            result = current_project()
+            assert result['ok'] is True
+            assert result['project']['project'] == str(project_root)
+        finally:
+            os.chdir(original_cwd)
+            nbdev_mcp.utils.config.CURRENT_PROJECT = old_project
+            nbdev_mcp.utils.paths.CURRENT_PROJECT = old_paths_project
 
 
 class TestConsoleScriptsStatus:
     """Tests for console_scripts_status function."""
 
-    def test_console_scripts_no_project(self):
-        """console_scripts_status returns error with no project."""
+    def test_console_scripts_no_project(self, tmp_path):
+        """console_scripts_status returns error with no project in non-nbdev dir."""
+        import os
         import nbdev_mcp.utils.config
+        import nbdev_mcp.utils.paths
+
         old_project = nbdev_mcp.utils.config.CURRENT_PROJECT
+        old_paths_project = nbdev_mcp.utils.paths.CURRENT_PROJECT
+        original_cwd = os.getcwd()
+
         nbdev_mcp.utils.config.CURRENT_PROJECT = None
+        nbdev_mcp.utils.paths.CURRENT_PROJECT = None
+
         try:
+            os.chdir(tmp_path)
             result = console_scripts_status()
             assert result['ok'] is False
         finally:
+            os.chdir(original_cwd)
             nbdev_mcp.utils.config.CURRENT_PROJECT = old_project
+            nbdev_mcp.utils.paths.CURRENT_PROJECT = old_paths_project
 
 
 class TestFindProjects:

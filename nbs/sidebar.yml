@@ -1,0 +1,35 @@
+website:
+  sidebar:
+    contents:
+      - index.ipynb
+      - 10_resources.ipynb
+      - 20_prompts.ipynb
+      - 30_mcp.ipynb
+      - 40__main__.ipynb
+      - 40_installer.ipynb
+      - section: utils
+        contents:
+          - utils/00__init__.ipynb
+          - utils/01_types.ipynb
+          - utils/02_exceptions.ipynb
+          - utils/03_logs.ipynb
+          - utils/04_config.ipynb
+          - utils/05_re.ipynb
+          - utils/06_md.ipynb
+          - utils/07_nb.ipynb
+          - utils/08_paths.ipynb
+          - utils/09_rich.ipynb
+          - utils/10_subprocess.ipynb
+          - utils/11_explore.ipynb
+          - utils/12_nbformat.ipynb
+          - utils/13_extlib.ipynb
+      - section: tools
+        contents:
+          - tools/00__init__.ipynb
+          - tools/01_project.ipynb
+          - tools/02_env.ipynb
+          - tools/03_nbdev.ipynb
+          - tools/04_editing.ipynb
+          - tools/05_lint.ipynb
+          - tools/06_analysis.ipynb
+          - tools/07_tests.ipynb

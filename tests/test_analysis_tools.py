@@ -12,31 +12,53 @@ from nbdev_mcp.tools.analysis import (
 class TestAnalyzeDependencyOrder:
     """Tests for analyze_dependency_order function."""
 
-    def test_analyze_dependency_order_no_project(self):
-        """analyze_dependency_order returns error with no project."""
+    def test_analyze_dependency_order_no_project(self, tmp_path):
+        """analyze_dependency_order returns error when cwd is not nbdev project."""
+        import os
         import nbdev_mcp.utils.config
+        import nbdev_mcp.utils.paths
+
         old_project = nbdev_mcp.utils.config.CURRENT_PROJECT
+        old_paths_project = nbdev_mcp.utils.paths.CURRENT_PROJECT
+        original_cwd = os.getcwd()
+
         nbdev_mcp.utils.config.CURRENT_PROJECT = None
+        nbdev_mcp.utils.paths.CURRENT_PROJECT = None
+
         try:
+            os.chdir(tmp_path)
             result = analyze_dependency_order()
             assert result['ok'] is False
         finally:
+            os.chdir(original_cwd)
             nbdev_mcp.utils.config.CURRENT_PROJECT = old_project
+            nbdev_mcp.utils.paths.CURRENT_PROJECT = old_paths_project
 
 
 class TestDependencyTree:
     """Tests for dependency_tree function."""
 
-    def test_dependency_tree_no_project(self):
-        """dependency_tree returns error with no project."""
+    def test_dependency_tree_no_project(self, tmp_path):
+        """dependency_tree returns error when cwd is not nbdev project."""
+        import os
         import nbdev_mcp.utils.config
+        import nbdev_mcp.utils.paths
+
         old_project = nbdev_mcp.utils.config.CURRENT_PROJECT
+        old_paths_project = nbdev_mcp.utils.paths.CURRENT_PROJECT
+        original_cwd = os.getcwd()
+
         nbdev_mcp.utils.config.CURRENT_PROJECT = None
+        nbdev_mcp.utils.paths.CURRENT_PROJECT = None
+
         try:
+            os.chdir(tmp_path)
             result = dependency_tree()
             assert result['ok'] is False
         finally:
+            os.chdir(original_cwd)
             nbdev_mcp.utils.config.CURRENT_PROJECT = old_project
+            nbdev_mcp.utils.paths.CURRENT_PROJECT = old_paths_project
 
 
 class TestAnalysisToolsIntegration:

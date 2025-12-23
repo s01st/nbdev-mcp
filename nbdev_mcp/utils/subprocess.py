@@ -6,14 +6,18 @@
 from __future__ import annotations
 from typing import Any, Dict, List, Optional
 
+import time
 import shlex
 import subprocess
 from pathlib import Path
+from .logs import log
+
 
 from .paths import discover_env_name
 
+
 # %% auto 0
-__all__ = ['tail', 'ok', 'which', 'wrap_with_env', 'run']
+__all__ = ['tail', 'ok', 'which', 'wrap_with_env', 'run', 'watch_notebooks']
 
 # %% ../../nbs/00_utils/10_subprocess.ipynb 6
 def tail(s: str | None, limit: int = 40000) -> str:
@@ -157,3 +161,82 @@ def run(cmd: List[str], cwd: Path) -> Dict[str, Any]:
         "stderr": tail(proc.stderr),
         "ok": ok(proc.returncode),
     }
+
+# %% ../../nbs/00_utils/10_subprocess.ipynb 15
+def watch_notebooks(project: Path, interval: float = 2.0, on_change: Optional[str] = None) -> None:
+    """Watch notebooks for changes and auto-export.
+    
+    Parameters
+    ----------
+    project : Path
+        Path to the nbdev project root.
+    interval : float, optional
+        Polling interval in seconds (default 2.0).
+    on_change : str, optional
+        Command to run on change (default: nbdev_export).
+    
+    Notes
+    -----
+    This is a blocking function that runs until interrupted.
+    Uses file modification time polling for simplicity (no external dependencies).
+    """
+    from nbdev_mcp.utils.paths import nbs_dir, iter_notebooks
+    
+    nbs = nbs_dir(project)
+    log.info(f"Watching notebooks in {nbs} (interval: {interval}s)")
+    log.info("Press Ctrl+C to stop watching")
+    
+    # Build initial mtime cache
+    mtimes: Dict[str, float] = {}
+    for nb in iter_notebooks(project, use_cache=False):
+        try:
+            mtimes[str(nb)] = nb.stat().st_mtime
+        except OSError:
+            pass
+    
+    log.info(f"Watching {len(mtimes)} notebooks")
+    
+    # Determine command to run
+    cmd = on_change or "nbdev_export"
+    
+    try:
+        while True:
+            time.sleep(interval)
+            changed = False
+            
+            # Check for changes
+            for nb in iter_notebooks(project, use_cache=False):
+                nb_str = str(nb)
+                try:
+                    current_mtime = nb.stat().st_mtime
+                    if nb_str not in mtimes:
+                        # New notebook
+                        log.info(f"New: {nb.name}")
+                        changed = True
+                        mtimes[nb_str] = current_mtime
+                    elif current_mtime > mtimes[nb_str]:
+                        # Modified notebook
+                        log.info(f"Changed: {nb.name}")
+                        changed = True
+                        mtimes[nb_str] = current_mtime
+                except OSError:
+                    pass
+            
+            if changed:
+                log.info(f"Running: {cmd}")
+                try:
+                    result = subprocess.run(
+                        cmd.split(),
+                        cwd=str(project),
+                        capture_output=True,
+                        text=True
+                    )
+                    if result.returncode == 0:
+                        log.info(f"✓ {cmd} completed successfully")
+                    else:
+                        log.error(f"✗ {cmd} failed: {result.stderr}")
+                except Exception as e:
+                    log.error(f"Error running {cmd}: {e}")
+                    
+    except KeyboardInterrupt:
+        log.info("\nWatch mode stopped")
