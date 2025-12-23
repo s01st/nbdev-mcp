@@ -38,8 +38,9 @@ console = Console();  # semicolon suppresses notebook output
 __all__ = ['console', 'app', 'set_http_path_if_supported', 'create_nbdev_mcp', 'Transport', 'Provider', 'version_callback',
            'callback', 'get_claude_config_path', 'get_vscode_config_path', 'get_cursor_config_path',
            'get_codex_config_path', 'get_config_path', 'get_mcp_key', 'get_python_path', 'make_server_config',
-           'make_server_config_for_provider', 'install_to_provider', 'uninstall_from_provider', 'check_provider_status',
-           'run', 'install', 'uninstall', 'status', 'main']
+           'make_server_config_for_provider', 'get_wrapper_script_path', 'generate_wrapper_script',
+           'install_wrapper_script', 'install_to_provider', 'uninstall_from_provider', 'check_provider_status', 'run',
+           'install', 'uninstall', 'status', 'main']
 
 # %% ../nbs/30_mcp.ipynb 6
 def set_http_path_if_supported(target_path: str) -> bool:

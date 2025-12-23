@@ -23,7 +23,7 @@ from ..utils.rich import render_result, render_table
 # %% auto 0
 __all__ = ['TOOL_ANNOTATIONS', 'set_project', 'current_project', 'console_scripts_status', 'find_projects', 'bookmark_project',
            'list_bookmarks', 'remove_bookmark', 'config_status', 'prompt_templates_status', 'health_check',
-           'add_project_tools']
+           'add_project_tools', 'analyze_remote', 'server_metrics']
 
 # %% ../../nbs/11_tools/01_project.ipynb 6
 def set_project(selector: str) -> Dict[str, Any]:
@@ -411,21 +411,281 @@ TOOL_ANNOTATIONS = {
         idempotentHint=True,
         openWorldHint=False
     ),
+    'server_metrics': ToolAnnotations(
+        title="Server Metrics",
+        readOnlyHint=True,
+        idempotentHint=True,
+        openWorldHint=False
+    ),
+    'analyze_remote': ToolAnnotations(
+        title="Analyze Remote",
+        readOnlyHint=True,
+        idempotentHint=True,
+        openWorldHint=True
+    ),
 }
 
 def add_project_tools(mcp: FastMCP) -> None:
     """Attach project management tools to the MCP server with annotations.
     
     Args:
-        mcp: The FastMCP server instance to register tools with.
+        mcp: FastMCP server instance.
     """
-    mcp.add_tool(set_project, annotations=TOOL_ANNOTATIONS['set_project'])
-    mcp.add_tool(current_project, annotations=TOOL_ANNOTATIONS['current_project'])
-    mcp.add_tool(console_scripts_status, annotations=TOOL_ANNOTATIONS['console_scripts_status'])
-    mcp.add_tool(find_projects, annotations=TOOL_ANNOTATIONS['find_projects'])
-    mcp.add_tool(bookmark_project, annotations=TOOL_ANNOTATIONS['bookmark_project'])
-    mcp.add_tool(list_bookmarks, annotations=TOOL_ANNOTATIONS['list_bookmarks'])
-    mcp.add_tool(remove_bookmark, annotations=TOOL_ANNOTATIONS['remove_bookmark'])
-    mcp.add_tool(config_status, annotations=TOOL_ANNOTATIONS['config_status'])
-    mcp.add_tool(prompt_templates_status, annotations=TOOL_ANNOTATIONS['prompt_templates_status'])
-    mcp.add_tool(health_check, annotations=TOOL_ANNOTATIONS['health_check'])
+    tools = [
+        ('set_project', set_project),
+        ('current_project', current_project),
+        ('console_scripts_status', console_scripts_status),
+        ('find_projects', find_projects),
+        ('bookmark_project', bookmark_project),
+        ('list_bookmarks', list_bookmarks),
+        ('remove_bookmark', remove_bookmark),
+        ('config_status', config_status),
+        ('prompt_templates_status', prompt_templates_status),
+        ('health_check', health_check),
+        ('server_metrics', server_metrics),
+        ('analyze_remote', analyze_remote),
+    ]
+    
+    for name, func in tools:
+        annotations = TOOL_ANNOTATIONS.get(name)
+        mcp.tool(name=name, annotations=annotations)(func)
+
+# %% ../../nbs/11_tools/01_project.ipynb 22
+import tempfile
+import shutil
+
+def analyze_remote(
+    url: str,
+    branch: str = "main",
+    shallow: bool = True
+) -> Dict[str, Any]:
+    """Tool: Analyze a remote nbdev project without permanent cloning.
+    
+    Clones a GitHub repository temporarily, analyzes its structure,
+    and returns information about the project. Useful for comparing
+    with local projects or understanding external nbdev projects.
+    
+    Args:
+        url: GitHub URL (https://github.com/user/repo) or shorthand (user/repo).
+        branch: Branch to analyze (default: main).
+        shallow: If True, do a shallow clone for faster analysis.
+    
+    Returns:
+        Result dict with project info, structure, and analysis.
+    """
+    import subprocess
+    
+    # Normalize URL
+    if not url.startswith('http'):
+        url = f'https://github.com/{url}'
+    
+    # Extract repo name
+    repo_name = url.rstrip('/').split('/')[-1]
+    if repo_name.endswith('.git'):
+        repo_name = repo_name[:-4]
+    
+    # Create temp directory
+    temp_dir = tempfile.mkdtemp(prefix='nbdev_mcp_')
+    clone_path = Path(temp_dir) / repo_name
+    
+    try:
+        # Clone the repo
+        cmd = ['git', 'clone']
+        if shallow:
+            cmd.extend(['--depth', '1'])
+        cmd.extend(['-b', branch, url, str(clone_path)])
+        
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+        if result.returncode != 0:
+            return {
+                'ok': False,
+                'error': f'Clone failed: {result.stderr}',
+                'url': url,
+                'branch': branch
+            }
+        
+        # Check if it's an nbdev project
+        settings_ini = clone_path / 'settings.ini'
+        if not settings_ini.exists():
+            return {
+                'ok': False,
+                'error': 'Not an nbdev project (no settings.ini found)',
+                'url': url
+            }
+        
+        # Parse settings.ini
+        from configparser import ConfigParser
+        config = ConfigParser()
+        config.read(settings_ini)
+        
+        settings = dict(config['DEFAULT']) if 'DEFAULT' in config else {}
+        
+        # Find notebooks
+        nbs_path = settings.get('nbs_path', 'nbs')
+        nbs_dir = clone_path / nbs_path
+        
+        notebooks = []
+        if nbs_dir.exists():
+            notebooks = sorted([
+                str(nb.relative_to(clone_path))
+                for nb in nbs_dir.rglob('*.ipynb')
+                if not nb.name.startswith('.')
+            ])
+        
+        # Find lib path
+        lib_path = settings.get('lib_path', settings.get('lib_name', ''))
+        lib_dir = clone_path / lib_path
+        
+        modules = []
+        if lib_dir.exists():
+            modules = sorted([
+                str(m.relative_to(clone_path))
+                for m in lib_dir.rglob('*.py')
+                if not m.name.startswith('.')
+            ])
+        
+        # Build analysis
+        analysis = {
+            'ok': True,
+            'url': url,
+            'branch': branch,
+            'name': settings.get('lib_name', repo_name),
+            'version': settings.get('version', 'unknown'),
+            'description': settings.get('description', ''),
+            'author': settings.get('author', ''),
+            'requirements': settings.get('requirements', '').split(),
+            'notebooks': {
+                'count': len(notebooks),
+                'paths': notebooks[:50],  # Limit to 50
+            },
+            'modules': {
+                'count': len(modules),
+                'paths': modules[:50],
+            },
+            'settings': {k: v for k, v in settings.items() if k not in ['requirements', 'dev_requirements']},
+        }
+        
+        from nbdev_mcp.utils.rich import render_result
+        pretty = render_result(f'Remote Analysis: {repo_name}', {
+            'name': analysis['name'],
+            'version': analysis['version'],
+            'notebooks': analysis['notebooks']['count'],
+            'modules': analysis['modules']['count'],
+            'description': analysis['description'][:100] if analysis['description'] else 'N/A'
+        })
+        
+        return {**analysis, 'pretty': pretty}
+        
+    except subprocess.TimeoutExpired:
+        return {'ok': False, 'error': 'Clone timed out', 'url': url}
+    except Exception as e:
+        return {'ok': False, 'error': str(e), 'url': url}
+    finally:
+        # Clean up temp directory
+        try:
+            shutil.rmtree(temp_dir)
+        except Exception:
+            pass
+
+# %% ../../nbs/11_tools/01_project.ipynb 23
+import time
+
+# Module-level tracking for server metrics
+_SERVER_START_TIME: Optional[float] = None;
+_REQUEST_COUNT: int = 0;
+_TOTAL_LATENCY_MS: float = 0.0;
+
+def _init_metrics():
+    """Initialize server metrics on first call."""
+    global _SERVER_START_TIME
+    if _SERVER_START_TIME is None:
+        _SERVER_START_TIME = time.time()
+
+def _record_request(latency_ms: float):
+    """Record a request's latency."""
+    global _REQUEST_COUNT, _TOTAL_LATENCY_MS
+    _REQUEST_COUNT += 1
+    _TOTAL_LATENCY_MS += latency_ms
+
+def server_metrics() -> Dict[str, Any]:
+    """Tool: Return server performance and health metrics.
+    
+    Returns comprehensive server status including:
+    - Uptime
+    - Memory usage
+    - Request statistics
+    - System information
+    
+    Returns
+    -------
+    Dict[str, Any]
+        Result with uptime, memory, request stats, and system info.
+    """
+    import sys
+    import platform
+    import os
+    
+    _init_metrics()
+    
+    # Calculate uptime
+    uptime_seconds = time.time() - _SERVER_START_TIME if _SERVER_START_TIME else 0
+    uptime_hours = uptime_seconds / 3600
+    
+    # Memory usage
+    try:
+        import psutil
+        process = psutil.Process(os.getpid())
+        memory_mb = process.memory_info().rss / (1024 * 1024)
+        memory_percent = process.memory_percent()
+        cpu_percent = process.cpu_percent()
+    except ImportError:
+        # psutil not available
+        memory_mb = None
+        memory_percent = None
+        cpu_percent = None
+    
+    # Request stats
+    avg_latency = _TOTAL_LATENCY_MS / _REQUEST_COUNT if _REQUEST_COUNT > 0 else 0
+    
+    # Build metrics
+    metrics = {
+        'ok': True,
+        'uptime': {
+            'seconds': round(uptime_seconds, 1),
+            'hours': round(uptime_hours, 2),
+            'started_at': time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(_SERVER_START_TIME)) if _SERVER_START_TIME else None
+        },
+        'requests': {
+            'count': _REQUEST_COUNT,
+            'avg_latency_ms': round(avg_latency, 2),
+            'total_latency_ms': round(_TOTAL_LATENCY_MS, 2)
+        },
+        'memory': {
+            'rss_mb': round(memory_mb, 1) if memory_mb else 'N/A (install psutil)',
+            'percent': round(memory_percent, 1) if memory_percent else 'N/A',
+        },
+        'cpu': {
+            'percent': round(cpu_percent, 1) if cpu_percent else 'N/A (install psutil)',
+        },
+        'system': {
+            'python': sys.version.split()[0],
+            'platform': platform.system(),
+            'arch': platform.machine(),
+            'pid': os.getpid()
+        }
+    }
+    
+    from nbdev_mcp.utils.rich import render_table, render_panel
+    
+    rows = [
+        ['Uptime', f"{metrics['uptime']['hours']} hours"],
+        ['Requests', str(metrics['requests']['count'])],
+        ['Avg Latency', f"{metrics['requests']['avg_latency_ms']} ms"],
+        ['Memory', f"{metrics['memory']['rss_mb']} MB" if memory_mb else 'N/A'],
+        ['CPU', f"{metrics['cpu']['percent']}%" if cpu_percent else 'N/A'],
+        ['Python', metrics['system']['python']],
+        ['Platform', f"{metrics['system']['platform']} {metrics['system']['arch']}"],
+    ]
+    pretty = render_table('Server Metrics', ['Metric', 'Value'], rows)
+    
+    return {**metrics, 'pretty': pretty}

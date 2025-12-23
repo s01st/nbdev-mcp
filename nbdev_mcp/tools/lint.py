@@ -37,7 +37,7 @@ from nbdev_mcp.utils.nbformat import (
 # %% auto 0
 __all__ = ['LINT_TOOL_ANNOTATIONS', 'validate_inits', 'lint_rules', 'lint_main_guards', 'lint_imports', 'lint_types',
            'auto_fix_lint', 'lint_notebook_structure', 'lint_private_attributes', 'lint_cell_complexity',
-           'lint_import_order', 'add_lint_tools']
+           'lint_import_order', 'add_lint_tools', 'lint_dead_exports']
 
 # %% ../../nbs/11_tools/05_lint.ipynb 6
 def validate_inits(
@@ -993,6 +993,12 @@ LINT_TOOL_ANNOTATIONS = {
         idempotentHint=True,
         openWorldHint=False
     ),
+    'lint_dead_exports': ToolAnnotations(
+        title="Lint Dead Exports",
+        readOnlyHint=True,
+        idempotentHint=True,
+        openWorldHint=False
+    ),
 }
 
 def add_lint_tools(mcp: FastMCP) -> None:
@@ -1014,8 +1020,175 @@ def add_lint_tools(mcp: FastMCP) -> None:
         ('lint_private_attributes', lint_private_attributes),
         ('lint_cell_complexity', lint_cell_complexity),
         ('lint_import_order', lint_import_order),
+        ('lint_dead_exports', lint_dead_exports),
     ]
     
     for name, func in tools:
         annotations = LINT_TOOL_ANNOTATIONS.get(name)
         mcp.tool(name=name, annotations=annotations)(func)
+
+# %% ../../nbs/11_tools/05_lint.ipynb 25
+def lint_dead_exports(
+    project: Optional[str] = None,
+    ignore_patterns: Optional[List[str]] = None
+) -> Dict[str, Any]:
+    """Find exported symbols that are never imported elsewhere.
+    
+    Scans all notebooks to find exports that no other notebook imports.
+    These are potential dead code that could be removed.
+    
+    Parameters
+    ----------
+    project : str, optional
+        Project path or alias. Uses current project if not specified.
+    ignore_patterns : List[str], optional
+        List of symbol name patterns to ignore (e.g., ['main', 'cli']).
+    
+    Returns
+    -------
+    Dict[str, Any]
+        Result with 'dead_exports' list of unused symbols.
+    """
+    try:
+        p = resolve_selector(project)
+    except Exception as e:
+        return {'ok': False, 'error': str(e)}
+    
+    s = settings_dict(p)
+    lib = s.get('lib_name') or 'pkg'
+    ignore = set(ignore_patterns or [])
+    # Common entry points that may not be imported
+    ignore.update(['main', 'cli', 'app', 'run', 'serve'])
+    
+    # Phase 1: Collect all exports per module
+    exports_by_module: Dict[str, Dict[str, Dict[str, Any]]] = {}  # module -> {symbol -> {notebook, cell}}
+    
+    for nb in iter_notebooks(p):
+        data = read_nb(nb)
+        mod = find_default_exp(data) or abs_module_for_nb(p, nb)[1]
+        fq_mod = f'{lib}.{mod}'
+        
+        if fq_mod not in exports_by_module:
+            exports_by_module[fq_mod] = {}
+        
+        for i, cell in enumerate(data.get('cells', [])):
+            if cell.get('cell_type') != 'code':
+                continue
+            src = join_source(cell.get('source', []))
+            
+            # Only check exported cells
+            if not re.search(r'#\|\s*export\s*$', src, re.MULTILINE):
+                continue
+            
+            try:
+                tree = ast.parse(src)
+            except SyntaxError:
+                continue
+            
+            # Collect top-level definitions
+            for node in ast.iter_child_nodes(tree):
+                if isinstance(node, ast.FunctionDef) or isinstance(node, ast.AsyncFunctionDef):
+                    name = node.name
+                    if not name.startswith('_') and name not in ignore:
+                        exports_by_module[fq_mod][name] = {
+                            'notebook': str(nb.relative_to(p)),
+                            'cell': i,
+                            'type': 'function'
+                        }
+                elif isinstance(node, ast.ClassDef):
+                    name = node.name
+                    if not name.startswith('_') and name not in ignore:
+                        exports_by_module[fq_mod][name] = {
+                            'notebook': str(nb.relative_to(p)),
+                            'cell': i,
+                            'type': 'class'
+                        }
+                elif isinstance(node, ast.Assign):
+                    for target in node.targets:
+                        if isinstance(target, ast.Name):
+                            name = target.id
+                            if not name.startswith('_') and name.isupper() and name not in ignore:
+                                exports_by_module[fq_mod][name] = {
+                                    'notebook': str(nb.relative_to(p)),
+                                    'cell': i,
+                                    'type': 'constant'
+                                }
+    
+    # Phase 2: Collect all imports across notebooks
+    imported_symbols: set = set()  # (module, symbol) pairs
+    imported_modules: set = set()  # modules imported with "import module"
+    
+    for nb in iter_notebooks(p):
+        data = read_nb(nb)
+        
+        for cell in data.get('cells', []):
+            if cell.get('cell_type') != 'code':
+                continue
+            src = join_source(cell.get('source', []))
+            
+            try:
+                tree = ast.parse(src)
+            except SyntaxError:
+                continue
+            
+            for node in ast.walk(tree):
+                if isinstance(node, ast.ImportFrom):
+                    mod = node.module or ''
+                    if mod.startswith(lib):
+                        for alias in node.names:
+                            if alias.name == '*':
+                                # import * means all exports are used
+                                imported_modules.add(mod)
+                            else:
+                                imported_symbols.add((mod, alias.name))
+                elif isinstance(node, ast.Import):
+                    for alias in node.names:
+                        if alias.name.startswith(lib):
+                            imported_modules.add(alias.name)
+    
+    # Phase 3: Find dead exports (not imported anywhere)
+    dead_exports: List[Dict[str, Any]] = []
+    
+    for fq_mod, symbols in exports_by_module.items():
+        # If module is imported with "import module", all symbols are potentially used
+        if fq_mod in imported_modules:
+            continue
+        
+        for sym_name, sym_info in symbols.items():
+            # Check if symbol is imported anywhere
+            is_used = any(
+                (mod, sym_name) in imported_symbols
+                for mod in [fq_mod, fq_mod.replace(lib + '.', '')]
+            )
+            
+            if not is_used:
+                dead_exports.append({
+                    'symbol': sym_name,
+                    'module': fq_mod,
+                    'notebook': sym_info['notebook'],
+                    'cell': sym_info['cell'],
+                    'type': sym_info['type'],
+                    'message': f"'{sym_name}' exported from {fq_mod} but never imported"
+                })
+    
+    # Sort by notebook, then symbol
+    dead_exports.sort(key=lambda x: (x['notebook'], x['symbol']))
+    
+    if dead_exports:
+        rows = [[it['symbol'], it['type'], it['notebook'], it['module']]
+                for it in dead_exports[:200]]
+        pretty = render_table(
+            f'Dead Exports: {len(dead_exports)} unused symbols',
+            ['Symbol', 'Type', 'Notebook', 'Module'],
+            rows
+        )
+    else:
+        pretty = render_panel('lint_dead_exports', 'No dead exports found - all exports are used.')
+    
+    return {
+        'ok': len(dead_exports) == 0,
+        'dead_exports': dead_exports,
+        'total': len(dead_exports),
+        'total_exports': sum(len(syms) for syms in exports_by_module.values()),
+        'pretty': pretty
+    }
