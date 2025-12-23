@@ -4,13 +4,19 @@
 
 # %% ../nbs/30_mcp.ipynb 4
 from __future__ import annotations
-from typing import Any, Dict, List, Optional, Iterable, Tuple, Set
+from typing import Any, Dict, List, Optional, Annotated
+from enum import Enum
 
 import os, sys, json
-import argparse
 from pathlib import Path
 
-from mcp.server.fastmcp import FastMCP  # official MCP Python SDK (FastMCP 2.0+)
+import typer
+from rich.console import Console
+from rich.panel import Panel
+from rich.table import Table
+from rich import print as rprint
+
+from mcp.server.fastmcp import FastMCP
 
 from . import __version__
 from .utils.logs import log
@@ -26,9 +32,12 @@ from nbdev_mcp.tools import (
 from .prompts import add_prompts
 from .tasks import add_task_tools, enable_nbdev_tasks
 
+console = Console()
+
 # %% auto 0
-__all__ = ['set_http_path_if_supported', 'create_nbdev_mcp', 'main', 'get_claude_config_path', 'get_vscode_mcp_path',
-           'get_python_path', 'install_to_claude', 'uninstall_from_claude', 'run_server']
+__all__ = ['console', 'app', 'set_http_path_if_supported', 'create_nbdev_mcp', 'Transport', 'version_callback', 'main',
+           'get_claude_config_path', 'get_vscode_mcp_path', 'get_python_path', 'show_server_config', 'run', 'install',
+           'uninstall', 'status']
 
 # %% ../nbs/30_mcp.ipynb 6
 def set_http_path_if_supported(target_path: str) -> bool:
@@ -82,62 +91,51 @@ def create_nbdev_mcp(name: str = "mcp.nbdev") -> FastMCP:
     return mcp
 
 # %% ../nbs/30_mcp.ipynb 10
-def main() -> None:
-    """Entry point for the nbdev MCP server CLI."""
-    parser = argparse.ArgumentParser(
-        description="nbdev MCP server",
-        formatter_class=argparse.RawTextHelpFormatter,
-    )
-    parser.add_argument("-V", "--version", action="version", version=f"%(prog)s {__version__}")
-    
-    subparsers = parser.add_subparsers(dest="command", help="Commands")
-    
-    # --- run subcommand (default behavior) ---
-    run_parser = subparsers.add_parser("run", help="Run the MCP server (default)")
-    run_parser.add_argument("--project", help="Path or alias for an nbdev project.")
-    run_parser.add_argument("--transport", choices=("stdio", "http", "streamable-http"), 
-                            default=os.environ.get("NBDEV_MCP_TRANSPORT", "stdio"),
-                            help="Transport mode (default: stdio).")
-    run_parser.add_argument("--host", default=os.environ.get("NBDEV_MCP_HOST", "127.0.0.1"))
-    run_parser.add_argument("--port", type=int, default=int(os.environ.get("NBDEV_MCP_PORT", "8000")))
-    run_parser.add_argument("--path", default=os.environ.get("NBDEV_MCP_PATH", "/mcp"))
-    run_parser.add_argument("-v", "--verbose", action="store_true")
-    run_parser.add_argument("-w", "--watch", action="store_true")
-    run_parser.add_argument("--watch-interval", type=float, default=2.0)
-    run_parser.add_argument("--watch-cmd", default="nbdev_export")
-    
-    # --- install subcommand ---
-    install_parser = subparsers.add_parser("install", help="Install to Claude Desktop")
-    install_parser.add_argument("--dry-run", action="store_true", help="Show what would be done")
-    
-    # --- uninstall subcommand ---
-    uninstall_parser = subparsers.add_parser("uninstall", help="Remove from Claude Desktop")
-    uninstall_parser.add_argument("--dry-run", action="store_true", help="Show what would be done")
-    
-    # For backwards compat: add run args to main parser too
-    parser.add_argument("--project", help=argparse.SUPPRESS)
-    parser.add_argument("--transport", choices=("stdio", "http", "streamable-http"), 
-                        default=os.environ.get("NBDEV_MCP_TRANSPORT", "stdio"), help=argparse.SUPPRESS)
-    parser.add_argument("--host", default=os.environ.get("NBDEV_MCP_HOST", "127.0.0.1"), help=argparse.SUPPRESS)
-    parser.add_argument("--port", type=int, default=int(os.environ.get("NBDEV_MCP_PORT", "8000")), help=argparse.SUPPRESS)
-    parser.add_argument("--path", default=os.environ.get("NBDEV_MCP_PATH", "/mcp"), help=argparse.SUPPRESS)
-    parser.add_argument("-v", "--verbose", action="store_true", help=argparse.SUPPRESS)
-    parser.add_argument("-w", "--watch", action="store_true", help=argparse.SUPPRESS)
-    parser.add_argument("--watch-interval", type=float, default=2.0, help=argparse.SUPPRESS)
-    parser.add_argument("--watch-cmd", default="nbdev_export", help=argparse.SUPPRESS)
-    
-    args = parser.parse_args()
-    
-    # Handle install/uninstall
-    if args.command == "install":
-        install_to_claude(dry_run=args.dry_run)
-        return
-    elif args.command == "uninstall":
-        uninstall_from_claude(dry_run=args.dry_run)
-        return
-    
-    # Default: run server (with or without 'run' subcommand)
-    run_server(args)
+class Transport(str, Enum):
+    """MCP transport modes."""
+    stdio = "stdio"
+    http = "http"
+    streamable_http = "streamable-http"
+
+
+app = typer.Typer(
+    name="nbdev-mcp",
+    help="[bold blue]nbdev MCP server[/] - Model Context Protocol for nbdev projects",
+    rich_markup_mode="rich",
+    no_args_is_help=False,
+    add_completion=True,
+)
+
+
+def version_callback(value: bool):
+    if value:
+        rprint(f"[bold blue]nbdev-mcp[/] [dim]v{__version__}[/]")
+        raise typer.Exit()
+
+
+@app.callback(invoke_without_command=True)
+def main(
+    ctx: typer.Context,
+    version: Annotated[bool, typer.Option(
+        "-V", "--version", callback=version_callback, is_eager=True,
+        help="Show version and exit."
+    )] = False,
+    # Default run options (when no subcommand given)
+    project: Annotated[Optional[str], typer.Option(
+        "-p", "--project", help="Path or alias for an nbdev project."
+    )] = None,
+    transport: Annotated[Transport, typer.Option(
+        "-t", "--transport", help="Transport mode.",
+        envvar="NBDEV_MCP_TRANSPORT"
+    )] = Transport.stdio,
+    verbose: Annotated[bool, typer.Option(
+        "-v", "--verbose", help="Enable debug output."
+    )] = False,
+):
+    """Run the MCP server (default command)."""
+    if ctx.invoked_subcommand is None:
+        # No subcommand = run server
+        _run_server(project=project, transport=transport, verbose=verbose)
 
 # %% ../nbs/30_mcp.ipynb 12
 #| export
@@ -150,17 +148,17 @@ def get_claude_config_path() -> Path:
         return Path.home() / "Library/Application Support/Claude/claude_desktop_config.json"
     elif sys.platform == "win32":
         return Path(os.environ.get("APPDATA", "")) / "Claude/claude_desktop_config.json"
-    else:  # Linux
+    else:
         return Path.home() / ".config/Claude/claude_desktop_config.json"
 
 
 def get_vscode_mcp_path() -> Path:
-    """Get VS Code MCP settings path for current platform."""
+    """Get VS Code MCP settings path."""
     if sys.platform == "darwin":
         return Path.home() / "Library/Application Support/Code/User/settings.json"
     elif sys.platform == "win32":
         return Path(os.environ.get("APPDATA", "")) / "Code/User/settings.json"
-    else:  # Linux
+    else:
         return Path.home() / ".config/Code/User/settings.json"
 
 
@@ -169,140 +167,213 @@ def get_python_path() -> str:
     return sys.executable
 
 
-def install_to_claude(dry_run: bool = False) -> None:
-    """Install nbdev-mcp to Claude Desktop configuration.
-    
-    Parameters
-    ----------
-    dry_run : bool
-        If True, show what would be done without making changes.
-    """
-    config_path = get_claude_config_path()
-    python_path = get_python_path()
-    
-    server_config = {
-        "command": python_path,
+def show_server_config() -> dict:
+    """Generate server configuration dict."""
+    return {
+        "command": get_python_path(),
         "args": ["-m", "nbdev_mcp"]
     }
+
+# %% ../nbs/30_mcp.ipynb 17
+def _run_server(
+    project: Optional[str] = None,
+    transport: Transport = Transport.stdio,
+    host: str = "127.0.0.1",
+    port: int = 8000,
+    path: str = "/mcp",
+    verbose: bool = False,
+    watch: bool = False,
+    watch_interval: float = 2.0,
+    watch_cmd: str = "nbdev_export",
+) -> None:
+    """Internal: run the MCP server."""
+    if verbose:
+        import logging
+        logging.basicConfig(level=logging.DEBUG, format="%(message)s")
+        log.setLevel(logging.DEBUG)
+        console.print(f"[dim]nbdev-mcp v{__version__}[/]")
+
+    # Set project
+    proj_path = None
+    if project:
+        try:
+            proj_path = resolve_selector(project)
+            if verbose:
+                console.print(f"[green]✓[/] Project: {proj_path}")
+        except Exception as e:
+            console.print(f"[red]✗[/] {e}")
+            if watch:
+                raise typer.Exit(1)
+
+    # Watch mode
+    if watch:
+        if not proj_path:
+            console.print("[red]✗[/] Watch mode requires --project")
+            raise typer.Exit(1)
+        watch_notebooks(proj_path, interval=watch_interval, on_change=watch_cmd)
+        return
+
+    # Build MCP
+    mcp = create_nbdev_mcp()
+    
+    match transport:
+        case Transport.stdio:
+            mcp.run(transport="stdio")
+        case Transport.streamable_http | Transport.http:
+            default = (host == "127.0.0.1" and port == 8000 and path == "/mcp")
+            if default and transport == Transport.streamable_http:
+                mcp.run(transport="streamable-http")
+            else:
+                try:
+                    import uvicorn
+                except ImportError:
+                    console.print("[red]✗[/] uvicorn required: [dim]pip install uvicorn[/]")
+                    raise typer.Exit(1)
+                if path != "/mcp":
+                    set_http_path_if_supported(path)
+                uvicorn.run(mcp.streamable_http_app(), host=host, port=port)
+
+
+@app.command()
+def run(
+    project: Annotated[Optional[str], typer.Option(
+        "-p", "--project", help="Path or alias for nbdev project."
+    )] = None,
+    transport: Annotated[Transport, typer.Option(
+        "-t", "--transport", help="Transport: stdio, http, streamable-http.",
+        envvar="NBDEV_MCP_TRANSPORT"
+    )] = Transport.stdio,
+    host: Annotated[str, typer.Option(
+        "-H", "--host", help="Host for HTTP transport.",
+        envvar="NBDEV_MCP_HOST"
+    )] = "127.0.0.1",
+    port: Annotated[int, typer.Option(
+        "-P", "--port", help="Port for HTTP transport.",
+        envvar="NBDEV_MCP_PORT"
+    )] = 8000,
+    path: Annotated[str, typer.Option(
+        "--path", help="URL path for HTTP.",
+        envvar="NBDEV_MCP_PATH"
+    )] = "/mcp",
+    verbose: Annotated[bool, typer.Option(
+        "-v", "--verbose", help="Debug output."
+    )] = False,
+    watch: Annotated[bool, typer.Option(
+        "-w", "--watch", help="Watch notebooks and auto-export."
+    )] = False,
+    watch_interval: Annotated[float, typer.Option(
+        "--watch-interval", help="Watch polling interval (seconds)."
+    )] = 2.0,
+    watch_cmd: Annotated[str, typer.Option(
+        "--watch-cmd", help="Command on change."
+    )] = "nbdev_export",
+):
+    """Run the MCP server."""
+    _run_server(
+        project=project, transport=transport, host=host, port=port,
+        path=path, verbose=verbose, watch=watch,
+        watch_interval=watch_interval, watch_cmd=watch_cmd
+    )
+
+# %% ../nbs/30_mcp.ipynb 18
+@app.command()
+def install(
+    dry_run: Annotated[bool, typer.Option(
+        "-n", "--dry-run", help="Show what would be done."
+    )] = False,
+):
+    """Install nbdev-mcp to Claude Desktop."""
+    config_path = get_claude_config_path()
+    server_config = show_server_config()
     
     if dry_run:
-        print(f"Would install to: {config_path}")
-        print(f"Server config:")
-        print(json.dumps({"mcpServers": {"nbdev": server_config}}, indent=2))
+        console.print(Panel.fit(
+            f"[dim]Config:[/] {config_path}\n"
+            f"[dim]Python:[/] {server_config['command']}",
+            title="[yellow]Dry Run[/]",
+            border_style="yellow"
+        ))
+        console.print("\n[dim]Would add to mcpServers:[/]")
+        rprint({"nbdev": server_config})
         return
     
-    # Read existing config or create new
+    # Read or create config
     if config_path.exists():
         config = json.loads(config_path.read_text())
     else:
         config_path.parent.mkdir(parents=True, exist_ok=True)
         config = {}
     
-    # Add/update mcpServers
     if "mcpServers" not in config:
         config["mcpServers"] = {}
     config["mcpServers"]["nbdev"] = server_config
     
-    # Write config
     config_path.write_text(json.dumps(config, indent=2))
-    print(f"✓ Installed nbdev-mcp to {config_path}")
-    print(f"  Python: {python_path}")
-    print("  Restart Claude Desktop to activate.")
-
-
-def uninstall_from_claude(dry_run: bool = False) -> None:
-    """Remove nbdev-mcp from Claude Desktop configuration.
     
-    Parameters
-    ----------
-    dry_run : bool
-        If True, show what would be done without making changes.
-    """
+    console.print(Panel.fit(
+        f"[green]✓[/] Installed to [bold]{config_path}[/]\n"
+        f"[dim]Python:[/] {server_config['command']}\n\n"
+        "[yellow]Restart Claude Desktop to activate.[/]",
+        title="[green]Success[/]",
+        border_style="green"
+    ))
+
+
+@app.command()
+def uninstall(
+    dry_run: Annotated[bool, typer.Option(
+        "-n", "--dry-run", help="Show what would be done."
+    )] = False,
+):
+    """Remove nbdev-mcp from Claude Desktop."""
     config_path = get_claude_config_path()
     
     if not config_path.exists():
-        print(f"Config not found: {config_path}")
+        console.print(f"[yellow]⚠[/] Config not found: {config_path}")
         return
     
     config = json.loads(config_path.read_text())
     
     if "mcpServers" not in config or "nbdev" not in config["mcpServers"]:
-        print("nbdev-mcp not installed in Claude config.")
+        console.print("[yellow]⚠[/] nbdev-mcp not installed.")
         return
     
     if dry_run:
-        print(f"Would remove 'nbdev' from mcpServers in: {config_path}")
+        console.print(f"[yellow]Would remove[/] 'nbdev' from {config_path}")
         return
     
     del config["mcpServers"]["nbdev"]
     config_path.write_text(json.dumps(config, indent=2))
-    print(f"✓ Removed nbdev-mcp from {config_path}")
+    console.print(f"[green]✓[/] Removed nbdev-mcp from {config_path}")
 
-# %% ../nbs/30_mcp.ipynb 17
-def run_server(args) -> None:
-    """Run the MCP server with the given arguments."""
-    # Configure logging
-    if args.verbose:
-        import logging
-        logging.basicConfig(
-            level=logging.DEBUG,
-            format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-            datefmt="%Y-%m-%d %H:%M:%S"
-        )
-        log.setLevel(logging.DEBUG)
-        log.debug(f"nbdev-mcp {__version__}, Python {sys.version}")
 
-    # Set initial project if provided
-    proj_path = None
-    if args.project:
-        try:
-            proj_path = resolve_selector(args.project)
-            if args.verbose:
-                log.debug(f"Project: {proj_path}")
-        except Exception as e:
-            log.error(str(e))
-            if args.watch:
-                sys.exit(1)
-
-    # Watch mode
-    if args.watch:
-        if not proj_path:
-            log.error("Watch mode requires --project")
-            sys.exit(1)
-        watch_notebooks(proj_path, interval=args.watch_interval, on_change=args.watch_cmd)
-        return
-
-    # Build and run MCP server
-    mcp = create_nbdev_mcp()
+@app.command()
+def status():
+    """Show installation status."""
+    table = Table(title="nbdev-mcp Status", show_header=True)
+    table.add_column("Component", style="cyan")
+    table.add_column("Status")
+    table.add_column("Path", style="dim")
     
-    default_host, default_port, default_path = "127.0.0.1", 8000, "/mcp"
-    using_defaults = (args.host == default_host and args.port == default_port and args.path == default_path)
+    # Claude
+    claude_path = get_claude_config_path()
+    if claude_path.exists():
+        config = json.loads(claude_path.read_text())
+        installed = "mcpServers" in config and "nbdev" in config.get("mcpServers", {})
+        status = "[green]✓ Installed[/]" if installed else "[yellow]Not configured[/]"
+    else:
+        status = "[dim]Not found[/]"
+    table.add_row("Claude Desktop", status, str(claude_path))
+    
+    # Python
+    table.add_row("Python", f"[green]v{sys.version.split()[0]}[/]", get_python_path())
+    
+    # Version  
+    table.add_row("nbdev-mcp", f"[blue]v{__version__}[/]", "")
+    
+    console.print(table)
 
-    match args.transport:
-        case "stdio":
-            mcp.run(transport="stdio")
-        case "streamable-http":
-            if using_defaults:
-                mcp.run(transport="streamable-http")
-            else:
-                try:
-                    import uvicorn
-                except ImportError:
-                    log.error("uvicorn required for custom HTTP. pip install uvicorn")
-                    sys.exit(1)
-                if args.path != default_path:
-                    set_http_path_if_supported(args.path)
-                app = mcp.streamable_http_app()
-                uvicorn.run(app, host=args.host, port=args.port)
-        case "http":
-            try:
-                import uvicorn
-            except ImportError:
-                log.error("uvicorn required for HTTP. pip install uvicorn")
-                sys.exit(1)
-            if args.path != default_path:
-                set_http_path_if_supported(args.path)
-            app = mcp.streamable_http_app()
-            uvicorn.run(app, host=args.host, port=args.port)
-        case _:
-            raise SystemExit(f"Unknown transport: {args.transport!r}")
+# %% ../nbs/30_mcp.ipynb 19
+def main():
+    """Entry point for console script."""
+    app()
