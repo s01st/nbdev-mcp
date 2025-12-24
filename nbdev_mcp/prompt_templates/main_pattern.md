@@ -4,7 +4,7 @@
 1) Same notebook, separate cell:
 ```python
 #| export
-#| eval: False
+#| eval: false
 if __name__ == "__main__":
     import sys
     sys.exit(main())
@@ -18,7 +18,7 @@ if __name__ == "__main__":
 3) Export directly to __main__:
 ```python
 #| export __main__
-#| eval: False
+#| eval: false
 if __name__ == "__main__":
     import sys
     sys.exit(main())
