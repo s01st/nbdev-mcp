@@ -28,37 +28,80 @@
     "workspaceContains:**/_modidx.py"
   ],
   "main": "./out/extension.js",
-  "contributes": {
+    "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "nbdev-explorer",
+          "title": "nbdev",
+          "icon": "media/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "nbdev-explorer": [
+        {
+          "id": "nbdev-project",
+          "name": "Project"
+        },
+        {
+          "id": "nbdev-commands",
+          "name": "Commands"
+        },
+        {
+          "id": "nbdev-notebooks",
+          "name": "Notebooks"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "nbdev-project",
+        "contents": "No nbdev project detected.\n[Set Project](command:nbdev-mcp.setProject)"
+      }
+    ],
     "commands": [
       {
         "command": "nbdev-mcp.setProject",
         "title": "Set Active Project",
-        "category": "nbdev"
+        "category": "nbdev",
+        "icon": "$(folder-opened)"
       },
       {
         "command": "nbdev-mcp.currentProject",
         "title": "Show Current Project",
-        "category": "nbdev"
+        "category": "nbdev",
+        "icon": "$(info)"
       },
       {
         "command": "nbdev-mcp.export",
         "title": "Export Notebooks",
-        "category": "nbdev"
+        "category": "nbdev",
+        "icon": "$(export)"
       },
       {
         "command": "nbdev-mcp.prepare",
         "title": "Prepare (Export, Test, Clean)",
-        "category": "nbdev"
+        "category": "nbdev",
+        "icon": "$(package)"
       },
       {
         "command": "nbdev-mcp.test",
         "title": "Run Tests",
-        "category": "nbdev"
+        "category": "nbdev",
+        "icon": "$(beaker)"
       },
       {
         "command": "nbdev-mcp.lint",
         "title": "Lint Notebooks",
-        "category": "nbdev"
+        "category": "nbdev",
+        "icon": "$(checklist)"
+      },
+      {
+        "command": "nbdev-mcp.refresh",
+        "title": "Refresh",
+        "category": "nbdev",
+        "icon": "$(refresh)"
       },
       {
         "command": "nbdev-mcp.lintImports",
@@ -132,6 +175,25 @@
       }
     ],
     "menus": {
+      "view/title": [
+        {
+          "command": "nbdev-mcp.refresh",
+          "when": "view == nbdev-project || view == nbdev-notebooks",
+          "group": "navigation"
+        },
+        {
+          "command": "nbdev-mcp.setProject",
+          "when": "view == nbdev-project",
+          "group": "navigation"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "nbdev-mcp.analyzeExports",
+          "when": "view == nbdev-notebooks && viewItem == notebook",
+          "group": "inline"
+        }
+      ],
       "editor/context": [
         {
           "command": "nbdev-mcp.findSourceNotebook",

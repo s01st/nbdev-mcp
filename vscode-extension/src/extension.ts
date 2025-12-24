@@ -2,9 +2,12 @@ import * as vscode from 'vscode';
 import { NbdevMcpClient } from './mcpClient';
 import { registerCommands } from './commands';
 import { NbdevDiagnostics } from './diagnostics';
+import { ProjectViewProvider, CommandsViewProvider, NotebooksViewProvider } from './views';
 
 let mcpClient: NbdevMcpClient | undefined;
 let diagnostics: NbdevDiagnostics | undefined;
+let projectView: ProjectViewProvider | undefined;
+let notebooksView: NotebooksViewProvider | undefined;
 
 export async function activate(context: vscode.ExtensionContext) {
     console.log('nbdev-mcp extension is activating...');
@@ -15,6 +18,23 @@ export async function activate(context: vscode.ExtensionContext) {
     // Initialize diagnostics provider
     diagnostics = new NbdevDiagnostics();
     context.subscriptions.push(diagnostics);
+
+    // Initialize and register tree views
+    projectView = new ProjectViewProvider(mcpClient);
+    const commandsView = new CommandsViewProvider();
+    notebooksView = new NotebooksViewProvider(mcpClient);
+
+    vscode.window.registerTreeDataProvider('nbdev-project', projectView);
+    vscode.window.registerTreeDataProvider('nbdev-commands', commandsView);
+    vscode.window.registerTreeDataProvider('nbdev-notebooks', notebooksView);
+
+    // Register refresh command
+    context.subscriptions.push(
+        vscode.commands.registerCommand('nbdev-mcp.refresh', () => {
+            projectView?.refresh();
+            notebooksView?.refresh();
+        })
+    );
 
     // Register all commands
     registerCommands(context, mcpClient, diagnostics);
@@ -60,7 +80,19 @@ async function autoDetectProject(client: NbdevMcpClient): Promise<void> {
         try {
             await vscode.workspace.fs.stat(settingsIni);
             // Found an nbdev project
-            await client.setProject(folder.uri.fsPath);
+            const result = await client.setProject(folder.uri.fsPath);
+
+            // Update views with project info
+            if (result.ok) {
+                const projectInfo = {
+                    project: folder.uri.fsPath,
+                    lib_name: result.lib_name || folder.name,
+                    nbs_dir: result.nbs_dir || `${folder.uri.fsPath}/nbs`
+                };
+                projectView?.setProjectInfo(projectInfo);
+                notebooksView?.setNbsDir(projectInfo.nbs_dir as string);
+            }
+
             vscode.window.showInformationMessage(
                 `nbdev project detected: ${folder.name}`
             );
