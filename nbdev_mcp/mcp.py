@@ -223,7 +223,7 @@ def make_server_config() -> dict:
     """Generate server configuration dict."""
     return {
         "command": get_python_path(),
-        "args": ["-m", "nbdev_mcp"]
+        "args": ["-u", "-m", "nbdev_mcp"]
     }
 
 
@@ -231,7 +231,7 @@ def make_server_config_for_provider(provider: Provider, auto_start: bool = False
     """Generate server configuration dict for a specific provider."""
     base = {
         "command": get_python_path(),
-        "args": ["-m", "nbdev_mcp"]
+        "args": ["-u", "-m", "nbdev_mcp"]
     }
     # VS Code/Cursor mcp.json format includes "type" and optional "autoStart"
     if provider in (Provider.vscode, Provider.cursor):
@@ -256,7 +256,7 @@ def generate_wrapper_script() -> str:
         return f'''@echo off
 REM nbdev-mcp keep-alive wrapper
 :loop
-"{python_path}" -m nbdev_mcp %*
+"{python_path}" -u -m nbdev_mcp %*
 echo MCP exited with code %ERRORLEVEL%, restarting in 2 seconds...
 timeout /t 2 /nobreak >nul
 goto loop
@@ -271,7 +271,7 @@ RESTART_DELAY=2
 
 while true; do
     echo "[nbdev-mcp] Starting server..."
-    "$PYTHON" -m nbdev_mcp "$@"
+    "$PYTHON" -u -m nbdev_mcp "$@"
     EXIT_CODE=$?
     echo "[nbdev-mcp] Server exited with code $EXIT_CODE, restarting in ${{RESTART_DELAY}}s..."
     sleep $RESTART_DELAY
