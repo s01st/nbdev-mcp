@@ -87,47 +87,56 @@ export class NbdevMcpClient {
 
     private buildToolScript(toolName: string, args: Record<string, unknown>): string {
         const argsJson = JSON.stringify(args);
+        const moduleInfo = this.getToolModule(toolName);
         return `
 import json
 import sys
 try:
-    from nbdev_mcp.tools import ${this.getToolModule(toolName)}
-    result = ${toolName}(**${argsJson})
+    from ${moduleInfo.module} import ${moduleInfo.func}
+    result = ${moduleInfo.func}(**${argsJson})
     print(json.dumps(result))
 except Exception as e:
-    print(json.dumps({"ok": False, "error": str(e)}))
+    import traceback
+    print(json.dumps({"ok": False, "error": str(e), "traceback": traceback.format_exc()}))
     sys.exit(1)
 `;
     }
 
-    private getToolModule(toolName: string): string {
-        // Map tool names to their module imports
-        const moduleMap: Record<string, string> = {
-            'set_project': 'set_project',
-            'current_project': 'current_project',
-            'nbdev_export': 'nbdev_export',
-            'nbdev_prepare': 'nbdev_prepare',
-            'nbdev_test': 'nbdev_test',
-            'lint_rules': 'lint_rules',
-            'lint_imports': 'lint_imports',
-            'lint_main_guards': 'lint_main_guards',
-            'find_symbol': 'find_symbol',
-            'modidx_audit': 'modidx_audit',
-            'dependency_tree': 'dependency_tree',
-            'dependency_snapshot': 'dependency_snapshot',
-            'analyze_exports': 'analyze_exports',
-            'scan_notebook_errors': 'scan_notebook_errors',
-            'run_tutorials': 'run_tutorials',
-            'find_source_notebook': 'find_source_notebook',
-            'check_if_generated': 'check_if_generated',
-            'notebook_diff': 'notebook_diff',
-            'lint_dead_exports': 'lint_dead_exports',
-            'dependency_notebook': 'dependency_notebook',
-            'generate_api_docs': 'generate_api_docs',
-            'analyze_remote': 'analyze_remote',
-            'server_metrics': 'server_metrics',
+    private getToolModule(toolName: string): { module: string; func: string } {
+        // Map tool names to their full module paths
+        const moduleMap: Record<string, { module: string; func: string }> = {
+            // Project tools
+            'set_project': { module: 'nbdev_mcp.tools.project', func: 'set_project' },
+            'current_project': { module: 'nbdev_mcp.tools.project', func: 'current_project' },
+            // Nbdev tools
+            'nbdev_export': { module: 'nbdev_mcp.tools.nbdev', func: 'nbdev_export' },
+            'nbdev_prepare': { module: 'nbdev_mcp.tools.nbdev', func: 'nbdev_prepare' },
+            'nbdev_test': { module: 'nbdev_mcp.tools.nbdev', func: 'nbdev_test' },
+            // Lint tools
+            'lint_rules': { module: 'nbdev_mcp.tools.lint', func: 'lint_rules' },
+            'lint_imports': { module: 'nbdev_mcp.tools.lint', func: 'lint_imports' },
+            'lint_main_guards': { module: 'nbdev_mcp.tools.lint', func: 'lint_main_guards' },
+            'lint_dead_exports': { module: 'nbdev_mcp.tools.lint', func: 'lint_dead_exports' },
+            // Analysis tools
+            'find_symbol': { module: 'nbdev_mcp.tools.analysis', func: 'find_symbol' },
+            'modidx_audit': { module: 'nbdev_mcp.tools.analysis', func: 'modidx_audit' },
+            'dependency_tree': { module: 'nbdev_mcp.tools.analysis', func: 'dependency_tree' },
+            'dependency_snapshot': { module: 'nbdev_mcp.tools.analysis', func: 'dependency_snapshot' },
+            'dependency_notebook': { module: 'nbdev_mcp.tools.analysis', func: 'dependency_notebook' },
+            'generate_api_docs': { module: 'nbdev_mcp.tools.analysis', func: 'generate_api_docs' },
+            // Notebook tools
+            'analyze_exports': { module: 'nbdev_mcp.tools.notebook', func: 'analyze_exports' },
+            'find_source_notebook': { module: 'nbdev_mcp.tools.notebook', func: 'find_source_notebook' },
+            'check_if_generated': { module: 'nbdev_mcp.tools.notebook', func: 'check_if_generated' },
+            'notebook_diff': { module: 'nbdev_mcp.tools.notebook', func: 'notebook_diff' },
+            // Test tools
+            'scan_notebook_errors': { module: 'nbdev_mcp.tools.tests', func: 'scan_notebook_errors' },
+            'run_tutorials': { module: 'nbdev_mcp.tools.tests', func: 'run_tutorials' },
+            // Remote
+            'analyze_remote': { module: 'nbdev_mcp.tools.project', func: 'analyze_remote' },
+            'server_metrics': { module: 'nbdev_mcp.tools.project', func: 'server_metrics' },
         };
-        return moduleMap[toolName] || toolName;
+        return moduleMap[toolName] || { module: 'nbdev_mcp.tools', func: toolName };
     }
 
     dispose(): void {
