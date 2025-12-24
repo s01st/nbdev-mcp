@@ -31,6 +31,7 @@ from nbdev_mcp.tools import (
 )
 from .prompts import add_prompts
 from .tasks import add_task_tools, enable_nbdev_tasks
+from .tests.agent_e2e import add_recording_tools, enable_auto_recording
 
 console = Console();  # semicolon suppresses notebook output
 
@@ -90,6 +91,10 @@ def create_nbdev_mcp(name: str = "mcp.nbdev") -> FastMCP:
     
     # Task-based tools for auditing, deduplication, and refactoring
     add_task_tools(mcp)
+    
+    # E2E testing: recording tools for agent behavior analysis
+    add_recording_tools(mcp)
+    enable_auto_recording(mcp)  # Enable automatic recording when recording is active
     
     return mcp
 
