@@ -154,11 +154,6 @@
         "category": "nbdev"
       },
       {
-        "command": "nbdev-mcp.dependencyNotebook",
-        "title": "Generate Dependency Notebook",
-        "category": "nbdev"
-      },
-      {
         "command": "nbdev-mcp.generateApiDocs",
         "title": "Generate API Documentation",
         "category": "nbdev"
@@ -172,6 +167,18 @@
         "command": "nbdev-mcp.serverMetrics",
         "title": "Show Server Metrics",
         "category": "nbdev"
+      },
+      {
+        "command": "nbdev-mcp.stopPreview",
+        "title": "Stop Preview Server",
+        "category": "nbdev",
+        "icon": "$(stop)"
+      },
+      {
+        "command": "nbdev-mcp.showLintPanel",
+        "title": "Show Lint Results Panel",
+        "category": "nbdev",
+        "icon": "$(checklist)"
       }
     ],
     "menus": {

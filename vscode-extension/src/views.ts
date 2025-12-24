@@ -115,7 +115,8 @@ export class CommandsViewProvider implements vscode.TreeDataProvider<NbdevTreeIt
             name: 'Lint & Analysis',
             icon: 'search',
             commands: [
-                { id: 'nbdev-mcp.lint', label: 'Lint Notebooks', icon: 'checklist' },
+                { id: 'nbdev-mcp.showLintPanel', label: 'Run All Checks', icon: 'checklist' },
+                { id: 'nbdev-mcp.lint', label: 'Lint Notebooks', icon: 'list-unordered' },
                 { id: 'nbdev-mcp.lintImports', label: 'Check Unused Imports', icon: 'warning' },
                 { id: 'nbdev-mcp.lintDeadExports', label: 'Find Dead Exports', icon: 'trash' },
                 { id: 'nbdev-mcp.scanErrors', label: 'Scan Notebook Errors', icon: 'error' },
@@ -125,8 +126,7 @@ export class CommandsViewProvider implements vscode.TreeDataProvider<NbdevTreeIt
             name: 'Dependencies',
             icon: 'git-merge',
             commands: [
-                { id: 'nbdev-mcp.dependencyTree', label: 'Show Dependency Tree', icon: 'type-hierarchy' },
-                { id: 'nbdev-mcp.dependencyNotebook', label: 'Generate Dependency Notebook', icon: 'notebook' },
+                { id: 'nbdev-mcp.dependencyTree', label: 'Show Dependency Graph', icon: 'type-hierarchy' },
                 { id: 'nbdev-mcp.modidxAudit', label: 'Audit Module Index', icon: 'list-tree' },
             ]
         },
@@ -134,7 +134,8 @@ export class CommandsViewProvider implements vscode.TreeDataProvider<NbdevTreeIt
             name: 'Documentation',
             icon: 'book',
             commands: [
-                { id: 'nbdev-mcp.generateApiDocs', label: 'Generate API Docs', icon: 'file-text' },
+                { id: 'nbdev-mcp.generateApiDocs', label: 'Preview Docs (Quarto)', icon: 'preview' },
+                { id: 'nbdev-mcp.stopPreview', label: 'Stop Preview Server', icon: 'debug-stop' },
                 { id: 'nbdev-mcp.runTutorials', label: 'Run Tutorials', icon: 'play' },
             ]
         },

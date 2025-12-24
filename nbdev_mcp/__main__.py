@@ -10,7 +10,7 @@ from .mcp import main
 __all__ = []
 
 # %% ../nbs/40__main__.ipynb 6
-#| eval: False
+#| eval: false
 if __name__ == "__main__":
     sys.exit(main())
 

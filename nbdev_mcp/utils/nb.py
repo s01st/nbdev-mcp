@@ -366,7 +366,6 @@ def split_imports(imports: List[Import], lib_name: str) -> Tuple[Set[str], Set[s
     return internal, external
 
 # %% ../../nbs/00_utils/07_nb.ipynb 25
-#| skip_showdoc: true
 def iter_export_cells(nb: NBFile | Dict[str, Any]) -> Iterable[Cell]:
     """Iterate over cells that have export directives.
     

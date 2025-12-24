@@ -6,7 +6,6 @@ website:
       - 20_prompts.ipynb
       - 30_mcp.ipynb
       - 40__main__.ipynb
-      - 40_installer.ipynb
       - section: utils
         contents:
           - utils/00__init__.ipynb
@@ -21,8 +20,10 @@ website:
           - utils/09_rich.ipynb
           - utils/10_subprocess.ipynb
           - utils/11_explore.ipynb
+          - utils/11_io.ipynb
           - utils/12_nbformat.ipynb
           - utils/13_extlib.ipynb
+          - utils/14_depgraph.ipynb
       - section: tools
         contents:
           - tools/00__init__.ipynb
@@ -33,3 +34,14 @@ website:
           - tools/05_lint.ipynb
           - tools/06_analysis.ipynb
           - tools/07_tests.ipynb
+      - section: tasks
+        contents:
+          - tasks/00__init__.ipynb
+          - tasks/01_core.ipynb
+          - tasks/02_audit.ipynb
+          - tasks/03_dedup.ipynb
+          - tasks/04_refactor.ipynb
+          - tasks/05_cache.ipynb
+      - section: tests
+        contents:
+          - tests/01_agent_e2e.ipynb

@@ -4,6 +4,6 @@ project:
 website:
   title: "nbdev-mcp"
   site-url: "https://s01st.github.io/nbdev-mcp"
-  description: ""
+  description: "MCP server for nbdev projects - analyze, lint, test, and manage notebook-driven Python development with AI assistants"
   repo-branch: main
   repo-url: "https://github.com/s01st/nbdev-mcp"

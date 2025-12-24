@@ -86,13 +86,24 @@ export class NbdevMcpClient {
     }
 
     private buildToolScript(toolName: string, args: Record<string, unknown>): string {
-        const argsJson = JSON.stringify(args);
+        // Inject project path if we have one and it's not already in args
+        const finalArgs = { ...args };
+        if (this.currentProject && !finalArgs.project && !finalArgs.selector) {
+            finalArgs.project = this.currentProject;
+        }
+
+        const argsJson = JSON.stringify(finalArgs);
         const moduleInfo = this.getToolModule(toolName);
-        return `
-import json
+
+        // For tools that need project context, set project first (properly indented)
+        const setProjectCode = this.currentProject
+            ? `    from nbdev_mcp.tools.project import set_project\n    set_project(${JSON.stringify(this.currentProject)})\n`
+            : '';
+
+        return `import json
 import sys
 try:
-    from ${moduleInfo.module} import ${moduleInfo.func}
+${setProjectCode}    from ${moduleInfo.module} import ${moduleInfo.func}
     result = ${moduleInfo.func}(**${argsJson})
     print(json.dumps(result))
 except Exception as e:
@@ -124,11 +135,11 @@ except Exception as e:
             'dependency_snapshot': { module: 'nbdev_mcp.tools.analysis', func: 'dependency_snapshot' },
             'dependency_notebook': { module: 'nbdev_mcp.tools.analysis', func: 'dependency_notebook' },
             'generate_api_docs': { module: 'nbdev_mcp.tools.analysis', func: 'generate_api_docs' },
-            // Notebook tools
-            'analyze_exports': { module: 'nbdev_mcp.tools.notebook', func: 'analyze_exports' },
-            'find_source_notebook': { module: 'nbdev_mcp.tools.notebook', func: 'find_source_notebook' },
-            'check_if_generated': { module: 'nbdev_mcp.tools.notebook', func: 'check_if_generated' },
-            'notebook_diff': { module: 'nbdev_mcp.tools.notebook', func: 'notebook_diff' },
+            // Notebook/Editing tools
+            'analyze_exports': { module: 'nbdev_mcp.tools.editing', func: 'analyze_exports' },
+            'find_source_notebook': { module: 'nbdev_mcp.tools.editing', func: 'find_source_notebook' },
+            'check_if_generated': { module: 'nbdev_mcp.tools.editing', func: 'check_if_generated' },
+            'notebook_diff': { module: 'nbdev_mcp.tools.editing', func: 'notebook_diff' },
             // Test tools
             'scan_notebook_errors': { module: 'nbdev_mcp.tools.tests', func: 'scan_notebook_errors' },
             'run_tutorials': { module: 'nbdev_mcp.tools.tests', func: 'run_tutorials' },
