@@ -19,7 +19,7 @@ __all__ = ['EDIT_PY_FILE_SCENARIO', 'FIX_LINT_SCENARIO', 'EXPLORE_CODEBASE_SCENA
            'RUN_TESTS_SCENARIO', 'SCENARIOS', 'TEST_PROMPTS', 'ToolCall', 'ToolCallSession', 'TestScenario',
            'McpRecorder', 'run_scenario_validation', 'analyze_session_efficiency', 'get_recorder', 'start_recording',
            'stop_recording', 'is_recording', 'record_call', 'enable_auto_recording', 'create_test_project',
-           'cleanup_test_project', 'get_test_prompt', 'add_recording_tools']
+           'cleanup_test_project', 'get_test_prompt', 'run_agent_test', 'run_all_agent_tests', 'add_recording_tools']
 
 # %% ../../nbs/99_tests/01_agent_e2e.ipynb 6
 @dataclass
@@ -534,6 +534,149 @@ def get_test_prompt(scenario: str, project_path: Path) -> str:
     return template.format(lib_name=lib_name, project_path=project_path)
 
 # %% ../../nbs/99_tests/01_agent_e2e.ipynb 21
+import subprocess
+import os
+
+
+def run_agent_test(
+    agent: str,  # "claude" or "codex"
+    scenario: str,
+    project_path: Optional[Path] = None,
+    timeout: int = 120,
+    save_session: Optional[Path] = None
+) -> Dict[str, Any]:
+    """Run an automated agent test.
+    
+    Creates a test project, invokes the agent with a scenario prompt,
+    records tool calls, and validates against expected behavior.
+    
+    Args:
+        agent: Which agent CLI to use ("claude" or "codex")
+        scenario: Test scenario name (edit_py_file, fix_lint, etc.)
+        project_path: Optional existing project to test (creates temp if None)
+        timeout: Max seconds to wait for agent
+        save_session: Optional path to save session JSON
+    
+    Returns:
+        Dict with test results including passed, failures, stats
+    """
+    # Create test project if not provided
+    cleanup = False
+    if project_path is None:
+        project_path = create_test_project(f"agent_test_{scenario}")
+        cleanup = True
+    
+    try:
+        # Get the test prompt
+        prompt = get_test_prompt(scenario, project_path)
+        
+        # Build agent command
+        if agent == "claude":
+            cmd = ["claude", "--print", "-p", prompt]
+        elif agent == "codex":
+            cmd = ["codex", "-q", prompt]
+        else:
+            return {"ok": False, "error": f"Unknown agent: {agent}"}
+        
+        # Set environment to enable auto-recording
+        env = os.environ.copy()
+        env["NBDEV_MCP_AUTO_RECORD"] = "1"
+        env["NBDEV_MCP_PROJECT"] = str(project_path)
+        
+        # Create temp file for session output
+        session_file = save_session or Path(tempfile.mktemp(suffix=".json"))
+        env["NBDEV_MCP_SESSION_FILE"] = str(session_file)
+        
+        # Run agent
+        log.info(f"Running {agent} with scenario '{scenario}'...")
+        try:
+            result = subprocess.run(
+                cmd,
+                cwd=str(project_path),
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=timeout
+            )
+        except subprocess.TimeoutExpired:
+            return {
+                "ok": False,
+                "error": f"Agent timed out after {timeout}s",
+                "scenario": scenario
+            }
+        
+        # Load and validate session
+        if session_file.exists():
+            session = ToolCallSession.load(session_file)
+            validation = SCENARIOS[scenario].validate(session)
+            efficiency = analyze_session_efficiency(session)
+            
+            return {
+                "ok": validation["passed"],
+                "scenario": scenario,
+                "agent": agent,
+                "validation": validation,
+                "efficiency": efficiency,
+                "agent_output": result.stdout[:1000] if result.stdout else None,
+                "agent_stderr": result.stderr[:500] if result.stderr else None,
+                "session_file": str(session_file) if save_session else None
+            }
+        else:
+            return {
+                "ok": False,
+                "error": "No session file created - MCP may not have been used",
+                "scenario": scenario,
+                "agent_output": result.stdout[:1000] if result.stdout else None,
+                "agent_stderr": result.stderr[:500] if result.stderr else None
+            }
+    
+    finally:
+        if cleanup:
+            cleanup_test_project(project_path)
+
+
+def run_all_agent_tests(
+    agent: str = "claude",
+    scenarios: Optional[List[str]] = None,
+    save_dir: Optional[Path] = None
+) -> Dict[str, Any]:
+    """Run all agent tests and return summary.
+    
+    Args:
+        agent: Which agent CLI to use
+        scenarios: List of scenarios to test (all if None)
+        save_dir: Directory to save session files
+    
+    Returns:
+        Summary with passed/failed counts and details
+    """
+    scenarios = scenarios or list(SCENARIOS.keys())
+    results = []
+    
+    if save_dir:
+        save_dir = Path(save_dir)
+        save_dir.mkdir(parents=True, exist_ok=True)
+    
+    for scenario in scenarios:
+        save_path = save_dir / f"{scenario}.json" if save_dir else None
+        result = run_agent_test(agent, scenario, save_session=save_path)
+        results.append(result)
+        
+        status = "PASS" if result.get("ok") else "FAIL"
+        log.info(f"  {status}: {scenario}")
+    
+    passed = sum(1 for r in results if r.get("ok"))
+    failed = len(results) - passed
+    
+    return {
+        "total": len(results),
+        "passed": passed,
+        "failed": failed,
+        "pass_rate": passed / len(results) if results else 0,
+        "results": results
+    }
+
+# %% ../../nbs/99_tests/01_agent_e2e.ipynb 22
 def add_recording_tools(mcp) -> None:
     """Add recording control tools to MCP server."""
     
@@ -608,6 +751,6 @@ def add_recording_tools(mcp) -> None:
         """
         return run_scenario_validation(Path(session_path), scenario)
 
-# %% ../../nbs/99_tests/01_agent_e2e.ipynb 23
+# %% ../../nbs/99_tests/01_agent_e2e.ipynb 24
 #| export
 

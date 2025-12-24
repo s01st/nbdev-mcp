@@ -41,7 +41,7 @@ __all__ = ['console', 'app', 'set_http_path_if_supported', 'create_nbdev_mcp', '
            'get_codex_config_path', 'get_config_path', 'get_mcp_key', 'get_python_path', 'make_server_config',
            'make_server_config_for_provider', 'get_wrapper_script_path', 'generate_wrapper_script',
            'install_wrapper_script', 'install_to_provider', 'uninstall_from_provider', 'check_provider_status', 'run',
-           'install', 'uninstall', 'status', 'main']
+           'install', 'uninstall', 'status', 'test', 'main']
 
 # %% ../nbs/30_mcp.ipynb 6
 def set_http_path_if_supported(target_path: str) -> bool:
@@ -425,8 +425,9 @@ def _run_server(
         log.setLevel(logging.DEBUG)
         console.print(f"[dim]nbdev-mcp v{__version__}[/]")
 
-    # Set project
+    # Set project from env or arg
     proj_path = None
+    project = project or os.environ.get("NBDEV_MCP_PROJECT")
     if project:
         try:
             proj_path = resolve_selector(project)
@@ -447,6 +448,24 @@ def _run_server(
 
     # Build MCP
     mcp = create_nbdev_mcp()
+    
+    # Auto-recording for agent tests
+    if os.environ.get("NBDEV_MCP_AUTO_RECORD"):
+        from nbdev_mcp.tests.agent_e2e import start_recording
+        start_recording()
+        log.info("Auto-recording enabled via NBDEV_MCP_AUTO_RECORD")
+    
+    # Register shutdown handler to save session
+    session_file = os.environ.get("NBDEV_MCP_SESSION_FILE")
+    if session_file:
+        import atexit
+        def save_session_on_exit():
+            from nbdev_mcp.tests.agent_e2e import stop_recording
+            session = stop_recording()
+            if session:
+                session.save(Path(session_file))
+                log.info(f"Session saved to {session_file}")
+        atexit.register(save_session_on_exit)
     
     match transport:
         case Transport.stdio:
@@ -577,6 +596,71 @@ def status():
     console.print(table)
 
 # %% ../nbs/30_mcp.ipynb 19
+@app.command()
+def test(
+    agent: Annotated[str, typer.Argument(
+        help="Agent to test: claude or codex"
+    )] = "claude",
+    scenario: Annotated[Optional[str], typer.Option(
+        "-s", "--scenario", help="Specific scenario to test (all if omitted)"
+    )] = None,
+    save_dir: Annotated[Optional[str], typer.Option(
+        "-o", "--output", help="Directory to save session files"
+    )] = None,
+    timeout: Annotated[int, typer.Option(
+        "-t", "--timeout", help="Timeout per test in seconds"
+    )] = 120,
+):
+    """Run automated agent e2e tests.
+    
+    Tests agent behavior against expected patterns for MCP tool usage.
+    """
+    from nbdev_mcp.tests.agent_e2e import run_agent_test, run_all_agent_tests, SCENARIOS
+    
+    if scenario:
+        if scenario not in SCENARIOS:
+            console.print(f"[red]Unknown scenario: {scenario}[/]")
+            console.print(f"Available: {', '.join(SCENARIOS.keys())}")
+            raise typer.Exit(1)
+        
+        result = run_agent_test(
+            agent=agent,
+            scenario=scenario,
+            timeout=timeout,
+            save_session=Path(save_dir) / f"{scenario}.json" if save_dir else None
+        )
+        
+        if result.get("ok"):
+            console.print(f"[green]✓ PASS[/]: {scenario}")
+        else:
+            console.print(f"[red]✗ FAIL[/]: {scenario}")
+            for failure in result.get("validation", {}).get("failures", []):
+                console.print(f"  - {failure}")
+    else:
+        results = run_all_agent_tests(
+            agent=agent,
+            save_dir=Path(save_dir) if save_dir else None
+        )
+        
+        console.print()
+        table = Table(title=f"Agent Test Results ({agent})")
+        table.add_column("Scenario")
+        table.add_column("Status")
+        table.add_column("Details")
+        
+        for r in results["results"]:
+            status = "[green]PASS[/]" if r.get("ok") else "[red]FAIL[/]"
+            details = ""
+            if not r.get("ok"):
+                failures = r.get("validation", {}).get("failures", [])
+                details = failures[0] if failures else r.get("error", "")
+            table.add_row(r.get("scenario", "?"), status, details[:50])
+        
+        console.print(table)
+        console.print()
+        console.print(f"Pass rate: {results['passed']}/{results['total']} ({results['pass_rate']:.0%})")
+
+# %% ../nbs/30_mcp.ipynb 20
 def main():
     """Entry point for console script."""
     app()
