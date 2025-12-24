@@ -37,11 +37,12 @@ console = Console();  # semicolon suppresses notebook output
 
 # %% auto 0
 __all__ = ['console', 'app', 'set_http_path_if_supported', 'create_nbdev_mcp', 'Transport', 'Provider', 'version_callback',
-           'callback', 'get_claude_config_path', 'get_vscode_config_path', 'get_cursor_config_path',
-           'get_codex_config_path', 'get_config_path', 'get_mcp_key', 'get_python_path', 'make_server_config',
-           'make_server_config_for_provider', 'get_wrapper_script_path', 'generate_wrapper_script',
-           'install_wrapper_script', 'install_to_provider', 'uninstall_from_provider', 'check_provider_status', 'run',
-           'install', 'uninstall', 'status', 'test', 'main']
+           'callback', 'get_claude_config_path', 'get_vscode_config_path', 'get_vscode_settings_path',
+           'get_cursor_config_path', 'get_cursor_settings_path', 'get_codex_config_path', 'get_config_path',
+           'get_mcp_key', 'get_python_path', 'make_server_config', 'make_server_config_for_provider',
+           'get_wrapper_script_path', 'generate_wrapper_script', 'install_wrapper_script',
+           'enable_mcp_autostart_in_settings', 'install_to_provider', 'uninstall_from_provider',
+           'check_provider_status', 'run', 'install', 'uninstall', 'status', 'test', 'main']
 
 # %% ../nbs/30_mcp.ipynb 6
 def set_http_path_if_supported(target_path: str) -> bool:
@@ -177,6 +178,16 @@ def get_vscode_config_path() -> Path:
         return Path.home() / ".config/Code/User/mcp.json"
 
 
+def get_vscode_settings_path() -> Path:
+    """Get VS Code settings.json path."""
+    if sys.platform == "darwin":
+        return Path.home() / "Library/Application Support/Code/User/settings.json"
+    elif sys.platform == "win32":
+        return Path(os.environ.get("APPDATA", "")) / "Code/User/settings.json"
+    else:
+        return Path.home() / ".config/Code/User/settings.json"
+
+
 def get_cursor_config_path() -> Path:
     """Get Cursor MCP config path."""
     if sys.platform == "darwin":
@@ -185,6 +196,16 @@ def get_cursor_config_path() -> Path:
         return Path(os.environ.get("APPDATA", "")) / "Cursor/User/mcp.json"
     else:
         return Path.home() / ".config/Cursor/User/mcp.json"
+
+
+def get_cursor_settings_path() -> Path:
+    """Get Cursor settings.json path."""
+    if sys.platform == "darwin":
+        return Path.home() / "Library/Application Support/Cursor/User/settings.json"
+    elif sys.platform == "win32":
+        return Path(os.environ.get("APPDATA", "")) / "Cursor/User/settings.json"
+    else:
+        return Path.home() / ".config/Cursor/User/settings.json"
 
 
 def get_codex_config_path() -> Path:
@@ -322,6 +343,44 @@ def _parse_jsonc(text: str) -> dict:
         return {}
 
 
+def enable_mcp_autostart_in_settings(provider: Provider, dry_run: bool = False) -> bool:
+    """Enable chat.mcp.autostart in VS Code/Cursor settings.json.
+    
+    VS Code requires this setting for MCP servers to auto-start.
+    """
+    if provider == Provider.vscode:
+        settings_path = get_vscode_settings_path()
+    elif provider == Provider.cursor:
+        settings_path = get_cursor_settings_path()
+    else:
+        return False  # Only VS Code/Cursor need this
+    
+    # Read existing settings
+    if settings_path.exists():
+        settings = _parse_jsonc(settings_path.read_text())
+    else:
+        settings = {}
+    
+    # Check if already enabled
+    if settings.get("chat.mcp.autostart") is True:
+        console.print(f"[dim]  chat.mcp.autostart already enabled[/]")
+        return True
+    
+    # Enable autostart
+    settings["chat.mcp.autostart"] = True
+    
+    if dry_run:
+        console.print(f"\n[bold cyan]{provider.value.title()} Settings[/]")
+        console.print(f"[dim]File:[/] {settings_path}")
+        console.print(f"[dim]Action:[/] Set chat.mcp.autostart = true")
+        return True
+    
+    settings_path.parent.mkdir(parents=True, exist_ok=True)
+    settings_path.write_text(json.dumps(settings, indent=2))
+    console.print(f"[green]✓[/] Enabled chat.mcp.autostart in {settings_path}")
+    return True
+
+
 def install_to_provider(provider: Provider, dry_run: bool = False, auto_start: bool = False) -> bool:
     """Install nbdev-mcp to a provider's config."""
     config_path = get_config_path(provider)
@@ -350,11 +409,15 @@ def install_to_provider(provider: Provider, dry_run: bool = False, auto_start: b
             console.print(f"[dim]Action:[/] Create new config file")
         console.print(f"\n[dim]Full config that would be written:[/]")
         console.print_json(json.dumps(config, indent=2))
-        return True
+    else:
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        config_path.write_text(json.dumps(config, indent=2))
+        console.print(f"[green]✓[/] Installed to [bold]{provider.value}[/]: {config_path}")
     
-    config_path.parent.mkdir(parents=True, exist_ok=True)
-    config_path.write_text(json.dumps(config, indent=2))
-    console.print(f"[green]✓[/] Installed to [bold]{provider.value}[/]: {config_path}")
+    # Also enable autostart in settings.json for VS Code/Cursor
+    if auto_start and provider in (Provider.vscode, Provider.cursor):
+        enable_mcp_autostart_in_settings(provider, dry_run=dry_run)
+    
     return True
 
 
@@ -404,7 +467,21 @@ def check_provider_status(provider: Provider) -> dict:
     
     installed = mcp_key in config and "nbdev" in config.get(mcp_key, {})
     
-    return {"provider": provider.value, "installed": installed, "exists": True, "path": str(config_path)}
+    # Check autostart setting for VS Code/Cursor
+    autostart_enabled = None
+    if provider in (Provider.vscode, Provider.cursor):
+        settings_path = get_vscode_settings_path() if provider == Provider.vscode else get_cursor_settings_path()
+        if settings_path.exists():
+            try:
+                settings = _parse_jsonc(settings_path.read_text())
+                autostart_enabled = settings.get("chat.mcp.autostart", False)
+            except Exception:
+                pass
+    
+    result = {"provider": provider.value, "installed": installed, "exists": True, "path": str(config_path)}
+    if autostart_enabled is not None:
+        result["autostart"] = autostart_enabled
+    return result
 
 # %% ../nbs/30_mcp.ipynb 17
 def _run_server(
@@ -577,21 +654,29 @@ def status():
     table = Table(title="nbdev-mcp Status", show_header=True)
     table.add_column("Provider", style="cyan")
     table.add_column("Status")
+    table.add_column("Auto-Start")
     table.add_column("Path", style="dim")
     
     for provider in Provider:
         info = check_provider_status(provider)
         if not info["exists"]:
             st = "[dim]Config not found[/]"
+            autostart = ""
         elif info["installed"]:
             st = "[green]✓ Installed[/]"
+            # Show autostart status for VS Code/Cursor
+            if "autostart" in info:
+                autostart = "[green]✓[/]" if info["autostart"] else "[yellow]✗[/]"
+            else:
+                autostart = "[dim]n/a[/]"
         else:
             st = "[yellow]Not configured[/]"
-        table.add_row(provider.value.title(), st, info["path"])
+            autostart = ""
+        table.add_row(provider.value.title(), st, autostart, info["path"])
     
-    table.add_row("", "", "")
-    table.add_row("Python", f"[green]v{sys.version.split()[0]}[/]", get_python_path())
-    table.add_row("nbdev-mcp", f"[blue]v{__version__}[/]", "")
+    table.add_row("", "", "", "")
+    table.add_row("Python", f"[green]v{sys.version.split()[0]}[/]", "", get_python_path())
+    table.add_row("nbdev-mcp", f"[blue]v{__version__}[/]", "", "")
     
     console.print(table)
 
