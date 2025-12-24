@@ -195,7 +195,13 @@ export function registerCommands(
             await runWithProgress('Generating dependency tree...', async () => {
                 const result = await client.callTool('dependency_tree', { scope: 'internal' });
                 if (result.ok) {
-                    showOutputPanel('Dependency Tree', result.diagram as string || result.output as string || JSON.stringify(result, null, 2));
+                    // Show Mermaid diagram in WebView
+                    const mermaid = result.mermaid as string;
+                    if (mermaid) {
+                        showMermaidPanel(context, 'Dependency Tree', mermaid);
+                    } else {
+                        showOutputPanel('Dependency Tree', JSON.stringify(result, null, 2));
+                    }
                 } else {
                     vscode.window.showErrorMessage(`Failed: ${result.error}`);
                 }
@@ -208,11 +214,15 @@ export function registerCommands(
             await runWithProgress('Auditing module index...', async () => {
                 const result = await client.callTool('modidx_audit', {});
                 if (result.ok) {
-                    const issues = result.issues as Array<Record<string, unknown>> || [];
-                    if (issues.length === 0) {
+                    const duplicates = result.duplicates as Array<Record<string, unknown>> || [];
+                    const privateExports = result.private_exports as Array<Record<string, unknown>> || [];
+                    const numberingIssues = result.numbering_issues as Array<Record<string, unknown>> || [];
+                    const totalIssues = duplicates.length + privateExports.length + numberingIssues.length;
+
+                    if (totalIssues === 0) {
                         vscode.window.showInformationMessage('Module index looks healthy');
                     } else {
-                        showOutputPanel('Module Index Audit', formatAuditIssues(issues));
+                        showOutputPanel('Module Index Audit', formatModidxAudit(result));
                     }
                 } else {
                     vscode.window.showErrorMessage(`Audit failed: ${result.error}`);
@@ -475,20 +485,39 @@ function formatExports(result: Record<string, unknown>): string {
     return lines.join('\n');
 }
 
-function formatAuditIssues(issues: Array<Record<string, unknown>>): string {
+function formatModidxAudit(result: Record<string, unknown>): string {
     const lines: string[] = [];
     lines.push('Module Index Audit Results:');
     lines.push('');
 
-    for (const issue of issues) {
-        lines.push(`[${issue.severity}] ${issue.message}`);
-        if (issue.notebook) {
+    const duplicates = result.duplicates as Array<Record<string, unknown>> || [];
+    if (duplicates.length > 0) {
+        lines.push('=== Duplicate Exports ===');
+        for (const dup of duplicates) {
+            lines.push(`  Symbol: ${dup.symbol}`);
+            lines.push(`  Locations: ${JSON.stringify(dup.locations)}`);
+            lines.push('');
+        }
+    }
+
+    const privateExports = result.private_exports as Array<Record<string, unknown>> || [];
+    if (privateExports.length > 0) {
+        lines.push('=== Private Exports (should not be exported) ===');
+        for (const priv of privateExports) {
+            lines.push(`  Symbol: ${priv.symbol}`);
+            lines.push(`  Module: ${priv.module}`);
+            lines.push('');
+        }
+    }
+
+    const numberingIssues = result.numbering_issues as Array<Record<string, unknown>> || [];
+    if (numberingIssues.length > 0) {
+        lines.push('=== Numbering Issues ===');
+        for (const issue of numberingIssues) {
             lines.push(`  Notebook: ${issue.notebook}`);
+            lines.push(`  Issue: ${issue.message}`);
+            lines.push('');
         }
-        if (issue.symbol) {
-            lines.push(`  Symbol: ${issue.symbol}`);
-        }
-        lines.push('');
     }
 
     return lines.join('\n');
@@ -562,4 +591,71 @@ function formatServerMetrics(result: Record<string, unknown>): string {
     }
 
     return lines.join('\n');
+}
+
+function showMermaidPanel(context: vscode.ExtensionContext, title: string, mermaidCode: string): void {
+    const panel = vscode.window.createWebviewPanel(
+        'nbdevMermaid',
+        title,
+        vscode.ViewColumn.One,
+        { enableScripts: true }
+    );
+
+    panel.webview.html = `<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>${title}</title>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+    <style>
+        body {
+            background: var(--vscode-editor-background);
+            color: var(--vscode-editor-foreground);
+            font-family: var(--vscode-font-family);
+            padding: 20px;
+        }
+        .mermaid {
+            display: flex;
+            justify-content: center;
+        }
+        h1 {
+            font-size: 1.5em;
+            margin-bottom: 20px;
+            border-bottom: 1px solid var(--vscode-panel-border);
+            padding-bottom: 10px;
+        }
+        pre {
+            background: var(--vscode-textBlockQuote-background);
+            padding: 10px;
+            border-radius: 4px;
+            overflow-x: auto;
+            font-size: 12px;
+            margin-top: 20px;
+        }
+        .toggle {
+            cursor: pointer;
+            color: var(--vscode-textLink-foreground);
+            margin-top: 20px;
+        }
+        .code-block { display: none; }
+    </style>
+</head>
+<body>
+    <h1>${title}</h1>
+    <div class="mermaid">
+${mermaidCode}
+    </div>
+    <div class="toggle" onclick="document.querySelector('.code-block').style.display = document.querySelector('.code-block').style.display === 'none' ? 'block' : 'none'">
+        Show/Hide Mermaid Code
+    </div>
+    <pre class="code-block">${mermaidCode.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</pre>
+    <script>
+        mermaid.initialize({
+            startOnLoad: true,
+            theme: document.body.classList.contains('vscode-dark') ? 'dark' : 'default'
+        });
+    </script>
+</body>
+</html>`;
 }
