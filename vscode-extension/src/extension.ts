@@ -89,16 +89,25 @@ async function autoDetectProject(client: NbdevMcpClient): Promise<void> {
                 const settingsContent = await vscode.workspace.fs.readFile(settingsIni);
                 const settingsText = Buffer.from(settingsContent).toString('utf8');
 
-                // Parse lib_name from settings.ini
-                const libMatch = settingsText.match(/^lib_name\s*=\s*(.+)$/m);
-                if (libMatch) {
-                    libName = libMatch[1].trim();
+                // Build a map of all settings for interpolation
+                const settings: Record<string, string> = {};
+                for (const line of settingsText.split('\n')) {
+                    const match = line.match(/^(\w+)\s*=\s*(.+)$/);
+                    if (match) {
+                        settings[match[1]] = match[2].trim();
+                    }
                 }
 
-                // Parse nbs_path from settings.ini
-                const nbsMatch = settingsText.match(/^nbs_path\s*=\s*(.+)$/m);
-                if (nbsMatch) {
-                    nbsDir = `${projectPath}/${nbsMatch[1].trim()}`;
+                // Get lib_name with interpolation fallback
+                if (settings.lib_name) {
+                    libName = settings.lib_name;
+                    // Resolve %(key)s interpolations
+                    libName = libName.replace(/%\((\w+)\)s/g, (_, key) => settings[key] || folder.name);
+                }
+
+                // Get nbs_path
+                if (settings.nbs_path) {
+                    nbsDir = `${projectPath}/${settings.nbs_path}`;
                 }
             } catch {
                 // Use defaults if can't parse
@@ -115,10 +124,6 @@ async function autoDetectProject(client: NbdevMcpClient): Promise<void> {
             };
             projectView?.setProjectInfo(projectInfo);
             notebooksView?.setNbsDir(nbsDir);
-
-            vscode.window.showInformationMessage(
-                `nbdev project detected: ${libName}`
-            );
             return;
         } catch {
             // No settings.ini in this folder
