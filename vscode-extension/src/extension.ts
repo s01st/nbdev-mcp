@@ -79,22 +79,45 @@ async function autoDetectProject(client: NbdevMcpClient): Promise<void> {
         const settingsIni = vscode.Uri.joinPath(folder.uri, 'settings.ini');
         try {
             await vscode.workspace.fs.stat(settingsIni);
-            // Found an nbdev project
-            const result = await client.setProject(folder.uri.fsPath);
+            // Found an nbdev project - parse settings.ini for lib_name
+            const projectPath = folder.uri.fsPath;
+            let libName = folder.name;
+            let nbsDir = `${projectPath}/nbs`;
 
-            // Update views with project info
-            if (result.ok) {
-                const projectInfo = {
-                    project: folder.uri.fsPath,
-                    lib_name: result.lib_name || folder.name,
-                    nbs_dir: result.nbs_dir || `${folder.uri.fsPath}/nbs`
-                };
-                projectView?.setProjectInfo(projectInfo);
-                notebooksView?.setNbsDir(projectInfo.nbs_dir as string);
+            // Try to read settings.ini for lib_name and nbs_path
+            try {
+                const settingsContent = await vscode.workspace.fs.readFile(settingsIni);
+                const settingsText = Buffer.from(settingsContent).toString('utf8');
+
+                // Parse lib_name from settings.ini
+                const libMatch = settingsText.match(/^lib_name\s*=\s*(.+)$/m);
+                if (libMatch) {
+                    libName = libMatch[1].trim();
+                }
+
+                // Parse nbs_path from settings.ini
+                const nbsMatch = settingsText.match(/^nbs_path\s*=\s*(.+)$/m);
+                if (nbsMatch) {
+                    nbsDir = `${projectPath}/${nbsMatch[1].trim()}`;
+                }
+            } catch {
+                // Use defaults if can't parse
             }
 
+            // Update client's current project
+            client.setProject(projectPath);
+
+            // Update views with project info
+            const projectInfo = {
+                project: projectPath,
+                lib_name: libName,
+                nbs_dir: nbsDir
+            };
+            projectView?.setProjectInfo(projectInfo);
+            notebooksView?.setNbsDir(nbsDir);
+
             vscode.window.showInformationMessage(
-                `nbdev project detected: ${folder.name}`
+                `nbdev project detected: ${libName}`
             );
             return;
         } catch {
