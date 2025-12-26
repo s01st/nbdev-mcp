@@ -21,11 +21,15 @@ __all__ = ['STANDARD_ENDING', 'IMPORT_SECTION_RE', 'EXPORT_SECTION_RE', 'NEXT_SE
 
 # %% ../../nbs/00_utils/12_nbformat.ipynb 6
 # Standard ending structure for nbdev notebooks
+# Note: We construct the export call string dynamically to avoid triggering
+# nbdev's cell-skip logic which checks for literal 'nbdev_export()'
+_NBDEV_EXPORT_CALL = '#| hide\nimport nbdev; nbdev.' + 'nbdev_export()'
+
 STANDARD_ENDING = [
     {'type': 'markdown', 'source': '## Next'},
     {'type': 'code', 'source': '#| export\n\n'},
     {'type': 'markdown', 'source': '## Export'},
-    {'type': 'code', 'source': '#| hide\nimport nbdev; nbdev.nbdev_export()'},
+    {'type': 'code', 'source': _NBDEV_EXPORT_CALL},
 ]
 
 # Regex patterns for notebook structure
@@ -244,7 +248,7 @@ def has_standard_ending(nb: NotebookNode) -> bool:
     - ## Next (markdown)
     - #| export (empty code cell)
     - ## Export (markdown)
-    - #| hide + nbdev_export() (code cell)
+    - #| hide + ``nbdev_export`` (code cell)
     
     Parameters
     ----------

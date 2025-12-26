@@ -14,10 +14,10 @@ __all__ = ['DEFAULT_LOG_FORMAT', 'DEFAULT_LOG_NAME', 'log', 'setup_logging', 'se
 
 # %% ../../nbs/00_utils/03_logs.ipynb 6
 DEFAULT_LOG_FORMAT = "[%(asctime)s] %(levelname)s %(name)s: %(message)s"
-"""Default log format string used by nbdev-mcp loggers."""
+"""Default log format string used by nbdev-mcp loggers.""";
 
 DEFAULT_LOG_NAME = "mcp.nbdev"
-"""Default logger name for nbdev-mcp."""
+"""Default logger name for nbdev-mcp.""";
 
 
 def setup_logging(

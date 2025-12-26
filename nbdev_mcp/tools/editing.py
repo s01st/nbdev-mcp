@@ -420,7 +420,7 @@ def edit_notebook_cell(
     
     c = make_console()
     c.print(Panel(
-        f'[green]✓[/] Updated cell {cell_index} in {notebook}\n\n[yellow]⚠ Next step: Run nbdev_export()[/]',
+        f'[green]✓[/] Updated cell {cell_index} in {notebook}\n\n[yellow]⚠ Next step: Run nbdev_export[/]',
         title='Cell Edited'
     ))
     
@@ -429,7 +429,7 @@ def edit_notebook_cell(
         'notebook': str(nb_path.relative_to(p)),
         'cell_index': cell_index,
         'message': f'✓ Cell {cell_index} updated',
-        'next_step': 'Run nbdev_export() to regenerate Python modules',
+        'next_step': 'Run nbdev_export to regenerate Python modules',
         'pretty': get_output(c)
     }
 
@@ -550,7 +550,7 @@ def add_notebook_cell(
         'inserted_indices': inserted_indices,
         'has_standard_ending': has_standard_ending(nb),
         'message': f'✓ Added {cell_type} cell at index {insert_idx}',
-        'next_step': 'Run nbdev_export() if this is an export cell'
+        'next_step': 'Run nbdev_export if this is an export cell'
     }
 
 

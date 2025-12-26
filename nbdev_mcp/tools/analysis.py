@@ -19,6 +19,7 @@ from mcp.types import ToolAnnotations
 from nbdev_mcp.utils.paths import (
     nbs_dir, settings_dict, resolve_selector, iter_notebooks,
     read_nb, abs_module_for_nb, modidx_path, load_modidx, symbol_locations,
+    safe_relative_to,
 )
 from ..utils.nb import join_source, find_default_exp
 from ..utils.rich import render_table, render_panel
@@ -919,7 +920,7 @@ UTILS_REGISTRY = {
     'subprocess_helpers': '00_utils/10_subprocess.ipynb',
     'notebook_helpers': '00_utils/07_nb.ipynb',
 }
-"""Registry of canonical locations for utility types."""
+"""Registry of canonical locations for utility types.""";
 
 # %% ../../nbs/11_tools/06_analysis.ipynb 25
 def suggest_location(
@@ -1090,7 +1091,8 @@ def check_before_create(
     if len(proposed_parts) >= 2:
         # Check for similar module structure
         for nb in iter_notebooks(p):
-            nb_parts = str(nb.relative_to(nbs_dir(p))).replace('.ipynb', '').split('/')
+            # Use safe_relative_to to handle notebooks outside nbs/ (e.g., tutorials/)
+            nb_parts = safe_relative_to(nb, nbs_dir(p), p).replace('.ipynb', '').split('/')
             if len(nb_parts) >= 2 and proposed_parts[0] == nb_parts[0]:
                 if proposed_parts[-1] in nb_parts[-1] or nb_parts[-1] in proposed_parts[-1]:
                     warnings.append({

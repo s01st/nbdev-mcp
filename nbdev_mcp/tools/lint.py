@@ -789,7 +789,7 @@ def lint_private_attributes(
             rows
         )
     else:
-        pretty = render_panel('No private attributes found in exported classes', title='Private Attributes', style='green')
+        pretty = render_panel('lint_private_attributes', 'No private attributes found in exported classes')
     
     return {'ok': True, 'issues': issues, 'count': len(issues), 'pretty': pretty}
 
@@ -866,7 +866,7 @@ def lint_cell_complexity(
             rows
         )
     else:
-        pretty = render_panel('All cells have appropriate complexity', title='Cell Complexity', style='green')
+        pretty = render_panel('lint_cell_complexity', 'All cells have appropriate complexity')
     
     return {'ok': True, 'issues': issues, 'count': len(issues), 'pretty': pretty}
 
@@ -926,7 +926,7 @@ def lint_import_order(
             rows
         )
     else:
-        pretty = render_panel('All __future__ imports are correctly placed', title='Import Order', style='green')
+        pretty = render_panel('lint_import_order', 'All __future__ imports are correctly placed')
     
     return {'ok': True, 'issues': issues, 'count': len(issues), 'pretty': pretty}
 

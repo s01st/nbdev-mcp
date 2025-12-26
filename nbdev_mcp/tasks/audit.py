@@ -151,7 +151,7 @@ def check_export_consistency(project: Path) -> List[StructureIssue]:
     
     Looks for:
     - Same symbol exported from multiple notebooks
-    - Missing nbdev_export() calls
+    - Missing nbdev_export calls
     """
     issues = []
     symbol_sources: Dict[str, List[str]] = defaultdict(list)
@@ -185,8 +185,8 @@ def check_export_consistency(project: Path) -> List[StructureIssue]:
                 severity='info',
                 category='export',
                 notebook=nb_name,
-                message='Has exports but no nbdev.nbdev_export() call',
-                suggestion='Add nbdev.nbdev_export() at the end'
+                message='Has exports but no nbdev.nbdev_export call',
+                suggestion='Add nbdev.nbdev_export at the end'
             ))
     
     # Check for duplicate exports

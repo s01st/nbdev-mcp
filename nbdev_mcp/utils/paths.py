@@ -32,14 +32,14 @@ from nbdev_mcp.utils.re import (
 
 # %% auto 0
 __all__ = ['notebook_cache', 'NOTEBOOK_CACHE_TTL', 'expand', 'settings_dict', 'lib_name', 'nbs_dir', 'tutorials_dir',
-           'is_nbdev_project', 'env_file', 'discover_env_name', 'find_project_root', 'require_project',
-           'resolve_selector', 'clear_notebook_cache', 'iter_notebooks_uncached', 'iter_notebooks', 'project_summary',
-           'read_nb', 'write_nb', 'resolve_relative', 'abs_module_for_nb', 'py_to_notebook', 'modidx_path',
-           'clear_modidx_cache', 'load_modidx', 'symbol_locations', 'with_project', 'get_vscode_user_dir',
-           'get_vscode_mcp_path', 'get_vscode_settings_path', 'get_claude_config_dir', 'get_claude_config_path',
-           'get_claude_mcp_path', 'get_codex_config_dir', 'get_codex_config_path', 'get_ollama_config_dir',
-           'get_ollama_config_path', 'get_project_mcp_path', 'get_project_claude_path', 'get_all_config_paths',
-           'get_mcp_config_path']
+           'safe_relative_to', 'is_nbdev_project', 'env_file', 'discover_env_name', 'find_project_root',
+           'require_project', 'resolve_selector', 'clear_notebook_cache', 'iter_notebooks_uncached', 'iter_notebooks',
+           'project_summary', 'read_nb', 'write_nb', 'resolve_relative', 'abs_module_for_nb', 'py_to_notebook',
+           'modidx_path', 'clear_modidx_cache', 'load_modidx', 'symbol_locations', 'with_project',
+           'get_vscode_user_dir', 'get_vscode_mcp_path', 'get_vscode_settings_path', 'get_claude_config_dir',
+           'get_claude_config_path', 'get_claude_mcp_path', 'get_codex_config_dir', 'get_codex_config_path',
+           'get_ollama_config_dir', 'get_ollama_config_path', 'get_project_mcp_path', 'get_project_claude_path',
+           'get_all_config_paths', 'get_mcp_config_path']
 
 # %% ../../nbs/00_utils/08_paths.ipynb 6
 def expand(p: str) -> Path:
@@ -145,6 +145,42 @@ def tutorials_dir(project: Path) -> Path:
     return (project / "tutorials").resolve()
 
 # %% ../../nbs/00_utils/08_paths.ipynb 13
+def safe_relative_to(path: Path, base: Path, fallback_base: Optional[Path] = None) -> str:
+    """Safely compute relative path, with fallback for paths outside base.
+    
+    Parameters
+    ----------
+    path : Path
+        The path to make relative.
+    base : Path
+        The primary base directory to make path relative to.
+    fallback_base : Path, optional
+        If path is not under base, try this as fallback.
+        If None and path is not under base, returns path.name.
+    
+    Returns
+    -------
+    str
+        Relative path string, or just the filename if path is outside all bases.
+    
+    Examples
+    --------
+    >>> safe_relative_to(Path('/proj/nbs/foo.ipynb'), Path('/proj/nbs'))
+    'foo.ipynb'
+    >>> safe_relative_to(Path('/proj/tutorials/bar.ipynb'), Path('/proj/nbs'), Path('/proj'))
+    'tutorials/bar.ipynb'
+    """
+    try:
+        return str(path.relative_to(base))
+    except ValueError:
+        if fallback_base is not None:
+            try:
+                return str(path.relative_to(fallback_base))
+            except ValueError:
+                pass
+        return path.name
+
+# %% ../../nbs/00_utils/08_paths.ipynb 14
 def is_nbdev_project(p: Path) -> bool:
     """Check if the given Path is an nbdev project.
     
@@ -160,7 +196,7 @@ def is_nbdev_project(p: Path) -> bool:
     """
     return (p / "settings.ini").is_file() and nbs_dir(p).exists()
 
-# %% ../../nbs/00_utils/08_paths.ipynb 15
+# %% ../../nbs/00_utils/08_paths.ipynb 16
 def env_file(
     project: Path | None = None,
     scoped: bool = True,
@@ -210,7 +246,7 @@ def env_file(
             return cand.resolve()
     return candidates[0].resolve()
 
-# %% ../../nbs/00_utils/08_paths.ipynb 16
+# %% ../../nbs/00_utils/08_paths.ipynb 17
 def discover_env_name(project: Path) -> Optional[str]:
     """Read the env YAML file and extract the environment 'name' field.
     
@@ -234,7 +270,7 @@ def discover_env_name(project: Path) -> Optional[str]:
             return m.group(1)
     return None
 
-# %% ../../nbs/00_utils/08_paths.ipynb 18
+# %% ../../nbs/00_utils/08_paths.ipynb 19
 def find_project_root(start: Path) -> Optional[Path]:
     """Ascend from the given path to find the root of an nbdev project.
     
@@ -258,7 +294,7 @@ def find_project_root(start: Path) -> Optional[Path]:
             return None  # reached filesystem root
         p = p.parent
 
-# %% ../../nbs/00_utils/08_paths.ipynb 19
+# %% ../../nbs/00_utils/08_paths.ipynb 20
 def require_project() -> Path:
     """Get the currently active project Path, defaulting to cwd if valid.
     
@@ -299,7 +335,7 @@ def require_project() -> Path:
         "Either cd into an nbdev project, or use set_project(...) to select one."
     )
 
-# %% ../../nbs/00_utils/08_paths.ipynb 20
+# %% ../../nbs/00_utils/08_paths.ipynb 21
 def resolve_selector(selector: Optional[str]) -> Path:
     """Resolve a project selector string to an nbdev project Path.
     
@@ -342,13 +378,13 @@ def resolve_selector(selector: Optional[str]) -> Path:
         return root
     raise RuntimeError(f"Not an nbdev project (requires settings.ini and nbs/ folder): {p}")
 
-# %% ../../nbs/00_utils/08_paths.ipynb 23
+# %% ../../nbs/00_utils/08_paths.ipynb 24
 # Cache for notebook listings with time-based invalidation
 notebook_cache: Dict[str, Tuple[float, List[Path]]] = {}
 NOTEBOOK_CACHE_TTL = 30.0  # Cache TTL in seconds
 
 
-# %% ../../nbs/00_utils/08_paths.ipynb 24
+# %% ../../nbs/00_utils/08_paths.ipynb 25
 def clear_notebook_cache() -> None:
     """Clear the notebook listing cache.
     
@@ -359,7 +395,7 @@ def clear_notebook_cache() -> None:
     notebook_cache = {}
 
 
-# %% ../../nbs/00_utils/08_paths.ipynb 25
+# %% ../../nbs/00_utils/08_paths.ipynb 26
 def iter_notebooks_uncached(project: Path) -> List[Path]:
     """Internal: collect notebooks from nbs/ and tutorials/ without caching.
     
@@ -389,7 +425,7 @@ def iter_notebooks_uncached(project: Path) -> List[Path]:
     return result
 
 
-# %% ../../nbs/00_utils/08_paths.ipynb 26
+# %% ../../nbs/00_utils/08_paths.ipynb 27
 def iter_notebooks(project: Path, use_cache: bool = True) -> Iterable[Path]:
     """Iterate over all notebooks in the project.
     
@@ -425,7 +461,7 @@ def iter_notebooks(project: Path, use_cache: bool = True) -> Iterable[Path]:
     notebook_cache[cache_key] = (time.time(), result)
     yield from result
 
-# %% ../../nbs/00_utils/08_paths.ipynb 28
+# %% ../../nbs/00_utils/08_paths.ipynb 29
 def project_summary(project: Path) -> Dict[str, Any]:
     """Gather key info about the nbdev project.
     
@@ -451,7 +487,7 @@ def project_summary(project: Path) -> Dict[str, Any]:
         "env_file": str(ef) if ef.exists() else None,
     }
 
-# %% ../../nbs/00_utils/08_paths.ipynb 30
+# %% ../../nbs/00_utils/08_paths.ipynb 31
 def read_nb(path: Path) -> Dict[str, Any]:
     """Read a Jupyter notebook file and return its JSON contents.
     
@@ -467,7 +503,7 @@ def read_nb(path: Path) -> Dict[str, Any]:
     """
     return json.loads(path.read_text(encoding="utf-8"))
 
-# %% ../../nbs/00_utils/08_paths.ipynb 31
+# %% ../../nbs/00_utils/08_paths.ipynb 32
 def write_nb(path: Path, data: Dict[str, Any]) -> None:
     """Write a dict as JSON to a Jupyter notebook file.
     
@@ -480,7 +516,7 @@ def write_nb(path: Path, data: Dict[str, Any]) -> None:
     """
     path.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
-# %% ../../nbs/00_utils/08_paths.ipynb 33
+# %% ../../nbs/00_utils/08_paths.ipynb 34
 def resolve_relative(current: str, rel: str) -> str:
     """Resolve a relative import path to an absolute module path.
     
@@ -515,7 +551,7 @@ def resolve_relative(current: str, rel: str) -> str:
     tail_parts = [p for p in tail.split(".") if p]
     return ".".join(base_parts + tail_parts)
 
-# %% ../../nbs/00_utils/08_paths.ipynb 34
+# %% ../../nbs/00_utils/08_paths.ipynb 35
 def abs_module_for_nb(project: Path, nb_path: Path) -> Tuple[str, str]:
     """Determine the library name and absolute module path for a notebook.
     
@@ -537,8 +573,21 @@ def abs_module_for_nb(project: Path, nb_path: Path) -> Tuple[str, str]:
     data = read_nb(nb_path)
     mod = find_default_exp(data)
     nbs_root = nbs_dir(project)
-    if not mod:
+    
+    # Check if notebook is in nbs/ directory
+    try:
         rel = nb_path.relative_to(nbs_root)
+        in_nbs = True
+    except ValueError:
+        # Notebook is outside nbs/ (e.g., tutorials/)
+        # Use project-relative path for module name
+        try:
+            rel = nb_path.relative_to(project)
+        except ValueError:
+            rel = Path(nb_path.name)
+        in_nbs = False
+    
+    if not mod:
         parts = list(rel.parts)
         name = Path(parts[-1]).stem
         name = re.sub(DIGIT_PREFIX, "", name)
@@ -546,13 +595,14 @@ def abs_module_for_nb(project: Path, nb_path: Path) -> Tuple[str, str]:
             mod = ".".join(parts[:-1] + [name])
         else:
             mod = name
-    rel = nb_path.relative_to(nbs_root)
-    if rel.name == "00__init__.ipynb" and len(rel.parts) > 1:
+    
+    # Only check for __init__ notebooks if in nbs/
+    if in_nbs and rel.name == "00__init__.ipynb" and len(rel.parts) > 1:
         mod = ".".join(list(rel.parent.parts) + ["__init__"])
+    
     return lib, mod
 
-
-# %% ../../nbs/00_utils/08_paths.ipynb 35
+# %% ../../nbs/00_utils/08_paths.ipynb 36
 def py_to_notebook(project: Path, py_file: Path) -> Optional[Path]:
     """Find the source notebook that generated a Python module file.
     
@@ -601,7 +651,7 @@ def py_to_notebook(project: Path, py_file: Path) -> Optional[Path]:
     return None
 
 
-# %% ../../nbs/00_utils/08_paths.ipynb 37
+# %% ../../nbs/00_utils/08_paths.ipynb 38
 import runpy
 
 # Cache for modidx with mtime-based invalidation
@@ -710,7 +760,7 @@ def symbol_locations(modidx: Dict[str, Any], symbol: str) -> List[Dict[str, str]
     return out
 
 
-# %% ../../nbs/00_utils/08_paths.ipynb 41
+# %% ../../nbs/00_utils/08_paths.ipynb 42
 from functools import wraps
 from typing import Callable
 
@@ -749,7 +799,7 @@ def with_project(fn: Callable[..., Dict[str, Any]]) -> Callable[..., Dict[str, A
         return fn(p, **kwargs)
     return wrapper
 
-# %% ../../nbs/00_utils/08_paths.ipynb 44
+# %% ../../nbs/00_utils/08_paths.ipynb 45
 def get_vscode_user_dir() -> Path:
     """Get VS Code user settings directory.
     
@@ -765,42 +815,42 @@ def get_vscode_user_dir() -> Path:
         return Path(os.environ.get('APPDATA', '')) / 'Code' / 'User'
     return Path.home() / '.config' / 'Code' / 'User'
 
-# %% ../../nbs/00_utils/08_paths.ipynb 45
+# %% ../../nbs/00_utils/08_paths.ipynb 46
 def get_vscode_mcp_path() -> Path:
     """Get VS Code MCP configuration path."""
     return get_vscode_user_dir() / 'mcp.json'
 
-# %% ../../nbs/00_utils/08_paths.ipynb 46
+# %% ../../nbs/00_utils/08_paths.ipynb 47
 def get_vscode_settings_path() -> Path:
     """Get VS Code settings.json path."""
     return get_vscode_user_dir() / 'settings.json'
 
-# %% ../../nbs/00_utils/08_paths.ipynb 47
+# %% ../../nbs/00_utils/08_paths.ipynb 48
 def get_claude_config_dir() -> Path:
     """Get Claude Code configuration directory (~/.claude)."""
     return Path.home() / '.claude'
 
-# %% ../../nbs/00_utils/08_paths.ipynb 48
+# %% ../../nbs/00_utils/08_paths.ipynb 49
 def get_claude_config_path() -> Path:
     """Get Claude Code main config path (~/.claude.json)."""
     return Path.home() / '.claude.json'
 
-# %% ../../nbs/00_utils/08_paths.ipynb 49
+# %% ../../nbs/00_utils/08_paths.ipynb 50
 def get_claude_mcp_path() -> Path:
     """Get Claude Code MCP servers config path (~/.claude/mcp_servers.json)."""
     return get_claude_config_dir() / 'mcp_servers.json'
 
-# %% ../../nbs/00_utils/08_paths.ipynb 50
+# %% ../../nbs/00_utils/08_paths.ipynb 51
 def get_codex_config_dir() -> Path:
     """Get Codex configuration directory (~/.codex)."""
     return Path.home() / '.codex'
 
-# %% ../../nbs/00_utils/08_paths.ipynb 51
+# %% ../../nbs/00_utils/08_paths.ipynb 52
 def get_codex_config_path() -> Path:
     """Get Codex config.toml path."""
     return get_codex_config_dir() / 'config.toml'
 
-# %% ../../nbs/00_utils/08_paths.ipynb 52
+# %% ../../nbs/00_utils/08_paths.ipynb 53
 def get_ollama_config_dir() -> Path:
     """Get Ollama configuration directory.
     
@@ -814,24 +864,24 @@ def get_ollama_config_dir() -> Path:
         return Path(os.environ.get('LOCALAPPDATA', '')) / 'Ollama'
     return Path.home() / '.ollama'
 
-# %% ../../nbs/00_utils/08_paths.ipynb 53
+# %% ../../nbs/00_utils/08_paths.ipynb 54
 def get_ollama_config_path() -> Path:
     """Get Ollama configuration path."""
     return get_ollama_config_dir() / 'config.json'
 
-# %% ../../nbs/00_utils/08_paths.ipynb 54
+# %% ../../nbs/00_utils/08_paths.ipynb 55
 def get_project_mcp_path(project_dir: Optional[Path] = None) -> Path:
     """Get project-level MCP config path (.mcp.json)."""
     project = project_dir or Path.cwd()
     return project / '.mcp.json'
 
-# %% ../../nbs/00_utils/08_paths.ipynb 55
+# %% ../../nbs/00_utils/08_paths.ipynb 56
 def get_project_claude_path(project_dir: Optional[Path] = None) -> Path:
     """Get project-level Claude config path (.claude/mcp.json)."""
     project = project_dir or Path.cwd()
     return project / '.claude' / 'mcp.json'
 
-# %% ../../nbs/00_utils/08_paths.ipynb 56
+# %% ../../nbs/00_utils/08_paths.ipynb 57
 def get_all_config_paths() -> Dict[str, Path]:
     """Get all known MCP configuration paths.
     
@@ -847,7 +897,7 @@ def get_all_config_paths() -> Dict[str, Path]:
         'ollama': get_ollama_config_path(),
     }
 
-# %% ../../nbs/00_utils/08_paths.ipynb 57
+# %% ../../nbs/00_utils/08_paths.ipynb 58
 def get_mcp_config_path(provider: str) -> Optional[Path]:
     """Get config path for a specific MCP provider.
     
