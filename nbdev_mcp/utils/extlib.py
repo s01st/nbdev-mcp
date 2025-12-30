@@ -18,7 +18,9 @@ import pkgutil
 # %% auto 0
 __all__ = ['PACKAGE_RESOURCES', 'EXTERNAL_LIBS_DIR', 'KNOWN_DOC_URLS', 'NbdevLookup', 'get_package_modidx', 'get_public_symbols',
            'generate_modidx', 'get_cache_dir', 'save_package_index', 'load_package_index', 'get_or_create_index',
-           'scan_project_imports', 'index_project_externals', 'lookup_symbol']
+           'scan_project_imports', 'index_project_externals', 'lookup_symbol', 'discover_editable_installs',
+           'get_editable_modidx', 'index_local_projects', 'lookup_local_symbol', 'lookup_symbol_everywhere',
+           'get_local_project_cache']
 
 # %% ../../nbs/00_utils/13_extlib.ipynb 6
 # Default resources directory
@@ -539,6 +541,209 @@ def lookup_symbol(symbol: str, packages: Optional[List[str]] = None) -> Optional
     return None
 
 # %% ../../nbs/00_utils/13_extlib.ipynb 23
-#| export
+import subprocess
+
+def discover_editable_installs() -> Dict[str, Path]:
+    """Discover packages installed with `pip install -e .`.
+    
+    Queries pip for editable installs in the current environment.
+    
+    Returns
+    -------
+    Dict[str, Path]
+        Mapping of package names to their project paths.
+    """
+    editables: Dict[str, Path] = {}
+    
+    try:
+        # Use pip list --editable to find editable installs
+        result = subprocess.run(
+            [sys.executable, '-m', 'pip', 'list', '--editable', '--format=json'],
+            capture_output=True, text=True, timeout=30
+        )
+        if result.returncode == 0:
+            packages = json.loads(result.stdout)
+            for pkg in packages:
+                name = pkg.get('name', '').replace('-', '_').lower()
+                location = pkg.get('editable_project_location') or pkg.get('location', '')
+                if name and location:
+                    editables[name] = Path(location)
+    except (subprocess.TimeoutExpired, json.JSONDecodeError, Exception):
+        pass
+    
+    return editables
 
 
+def get_editable_modidx(package_name: str) -> Optional[Dict[str, Any]]:
+    """Get modidx from an editable install, with path info.
+    
+    Parameters
+    ----------
+    package_name : str
+        The package name to look up.
+    
+    Returns
+    -------
+    Dict[str, Any] or None
+        The modidx 'd' dict with added 'project_path' if found.
+    """
+    modidx = get_package_modidx(package_name)
+    if modidx:
+        # Try to get project path from editable installs
+        editables = discover_editable_installs()
+        norm_name = package_name.replace('-', '_').lower()
+        if norm_name in editables:
+            modidx['_project_path'] = str(editables[norm_name])
+        return modidx
+    return None
+
+
+# Cache for local project indices
+_LOCAL_PROJECT_CACHE: Dict[str, NbdevLookup] = {}
+"""Cache of NbdevLookup objects for local editable projects.""";
+
+
+def index_local_projects(
+    include_paths: Optional[List[str]] = None,
+    force: bool = False
+) -> Dict[str, Any]:
+    """Index all local nbdev projects (editable installs).
+    
+    Discovers editable installs from pip and indexes those that
+    have a `_modidx.py` (nbdev projects).
+    
+    Parameters
+    ----------
+    include_paths : List[str], optional
+        Additional paths to scan for nbdev projects.
+    force : bool
+        If True, refresh the cache even if already indexed.
+    
+    Returns
+    -------
+    Dict[str, Any]
+        Result with 'indexed' projects and 'failed' list.
+    """
+    global _LOCAL_PROJECT_CACHE
+    
+    if force:
+        _LOCAL_PROJECT_CACHE.clear()
+    
+    indexed = []
+    failed = []
+    editables = discover_editable_installs()
+    
+    # Also scan include_paths for nbdev projects
+    if include_paths:
+        for path_str in include_paths:
+            path = Path(path_str).expanduser()
+            if path.is_dir():
+                # Check if it's an nbdev project (has settings.ini)
+                if (path / 'settings.ini').exists():
+                    # Try to determine package name from settings.ini
+                    try:
+                        import configparser
+                        cfg = configparser.ConfigParser()
+                        cfg.read(path / 'settings.ini')
+                        lib_name = cfg.get('DEFAULT', 'lib_name', fallback=None)
+                        if lib_name and lib_name not in editables:
+                            editables[lib_name] = path
+                    except Exception:
+                        pass
+    
+    for pkg_name, project_path in editables.items():
+        if not force and pkg_name in _LOCAL_PROJECT_CACHE:
+            indexed.append({'package': pkg_name, 'path': str(project_path), 'cached': True})
+            continue
+        
+        try:
+            modidx = get_package_modidx(pkg_name)
+            if modidx:
+                lookup = NbdevLookup(modidx)
+                _LOCAL_PROJECT_CACHE[pkg_name] = lookup
+                indexed.append({'package': pkg_name, 'path': str(project_path), 'cached': False})
+            else:
+                failed.append({'package': pkg_name, 'path': str(project_path), 'reason': 'no _modidx.py'})
+        except Exception as e:
+            failed.append({'package': pkg_name, 'path': str(project_path), 'reason': str(e)})
+    
+    return {
+        'ok': True,
+        'indexed': indexed,
+        'failed': failed,
+        'total_cached': len(_LOCAL_PROJECT_CACHE)
+    }
+
+
+def lookup_local_symbol(symbol: str) -> Optional[Dict[str, Any]]:
+    """Look up a symbol in local editable projects.
+    
+    Searches the cached local project indices for a symbol.
+    Call `index_local_projects()` first to populate the cache.
+    
+    Parameters
+    ----------
+    symbol : str
+        The symbol to look up (e.g., 'mypackage.module.func').
+    
+    Returns
+    -------
+    Dict[str, Any] or None
+        Dict with 'package', 'doc_url', 'source_file' if found.
+    """
+    for pkg_name, lookup in _LOCAL_PROJECT_CACHE.items():
+        doc_url = lookup.doc_link(symbol)
+        if doc_url:
+            return {
+                'package': pkg_name,
+                'symbol': symbol,
+                'doc_url': doc_url,
+                'source_file': lookup.source_file(symbol),
+                'local': True
+            }
+    return None
+
+
+def lookup_symbol_everywhere(
+    symbol: str,
+    packages: Optional[List[str]] = None,
+    include_local: bool = True
+) -> Optional[Dict[str, Any]]:
+    """Look up a symbol in both external and local package indices.
+    
+    Parameters
+    ----------
+    symbol : str
+        The symbol to look up.
+    packages : List[str], optional
+        External packages to search. If None, searches all cached.
+    include_local : bool
+        If True, also search local editable projects.
+    
+    Returns
+    -------
+    Dict[str, Any] or None
+        Dict with 'package', 'doc_url', 'source_file', 'local' if found.
+    """
+    # Search local projects first (they're likely what we want)
+    if include_local:
+        result = lookup_local_symbol(symbol)
+        if result:
+            return result
+    
+    # Fall back to external packages
+    result = lookup_symbol(symbol, packages)
+    if result:
+        result['local'] = False
+    return result
+
+
+def get_local_project_cache() -> Dict[str, NbdevLookup]:
+    """Get the current local project cache.
+    
+    Returns
+    -------
+    Dict[str, NbdevLookup]
+        The cached lookup objects for local projects.
+    """
+    return _LOCAL_PROJECT_CACHE.copy()

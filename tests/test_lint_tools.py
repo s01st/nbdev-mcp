@@ -142,6 +142,51 @@ nbs_path = nbs
         assert result['ok'] is True
         assert result['problems'] == []
 
+    def test_validate_inits_accepts_numbered_leaf_module(self, mock_nbdev_project):
+        """validate_inits accepts leaf-only module paths in numbered dirs."""
+        nbs_dir = mock_nbdev_project / 'nbs'
+        init_dir = nbs_dir / '50_group' / '00_mod'
+        init_dir.mkdir(parents=True)
+        init_nb = {
+            "cells": [
+                {"cell_type": "code", "metadata": {}, "source": ["#| default_exp mod.__init__"], "outputs": [], "execution_count": None},
+                {"cell_type": "code", "metadata": {}, "source": ["#| export\nVALUE = 1"], "outputs": [], "execution_count": None}
+            ],
+            "metadata": {},
+            "nbformat": 4,
+            "nbformat_minor": 5
+        }
+        (init_dir / '00__init__.ipynb').write_text(json.dumps(init_nb))
+
+        result = validate_inits(project=str(mock_nbdev_project))
+        assert result['ok'] is True
+        assert result['problems'] == []
+
+    def test_validate_inits_accepts_existing_module_path(self, mock_nbdev_project):
+        """validate_inits accepts module paths that exist in lib even if dir label differs."""
+        nbs_dir = mock_nbdev_project / 'nbs'
+        init_dir = nbs_dir / '50_workflows'
+        init_dir.mkdir(parents=True)
+
+        lib_dir = mock_nbdev_project / 'testlib' / 'workflow'
+        lib_dir.mkdir(parents=True)
+        (lib_dir / '__init__.py').write_text("# generated")
+
+        init_nb = {
+            "cells": [
+                {"cell_type": "code", "metadata": {}, "source": ["#| default_exp workflow.__init__"], "outputs": [], "execution_count": None},
+                {"cell_type": "code", "metadata": {}, "source": ["#| export\nVALUE = 2"], "outputs": [], "execution_count": None}
+            ],
+            "metadata": {},
+            "nbformat": 4,
+            "nbformat_minor": 5
+        }
+        (init_dir / '00__init__.ipynb').write_text(json.dumps(init_nb))
+
+        result = validate_inits(project=str(mock_nbdev_project))
+        assert result['ok'] is True
+        assert result['problems'] == []
+
     def test_lint_rules_clean_project(self, project_with_notebooks):
         """lint_rules on a clean project returns minimal issues."""
         result = lint_rules(project=str(project_with_notebooks))

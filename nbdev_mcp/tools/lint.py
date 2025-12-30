@@ -46,6 +46,9 @@ def validate_inits(
 ) -> Dict[str, Any]:
     """Validate that every 00__init__ notebook has correct default_exp.
     
+    Accepts numbered-directory prefixes and leaf-only module paths for
+    organizational notebook layouts.
+    
     Parameters
     ----------
     project : str, optional
@@ -64,6 +67,8 @@ def validate_inits(
         return {'ok': False, 'error': str(e)}
     
     nbs = nbs_dir(p)
+    lib = settings_dict(p).get("lib_name") or "pkg"
+    lib_path = (p / lib.replace("-", "_")).resolve()
     problems: List[Dict[str, Any]] = []
     fixed = 0
     
@@ -72,10 +77,38 @@ def validate_inits(
             continue
         
         rel = nb.relative_to(nbs) if nbs in nb.parents else nb
-        expected = '__init__' if len(rel.parts) == 1 else '.'.join(list(rel.parent.parts) + ['__init__'])
+        parent_parts = list(rel.parent.parts) if len(rel.parts) > 1 else []
+        expected_full = '__init__' if len(rel.parts) == 1 else '.'.join(parent_parts + ['__init__'])
+
+        stripped_parts: List[str] = []
+        has_numbered = False
+        for part in parent_parts:
+            match = re.match(r'^\d+_(.+)$', part)
+            if match:
+                stripped_parts.append(match.group(1))
+                has_numbered = True
+            else:
+                stripped_parts.append(part)
+        expected_stripped = '__init__' if len(rel.parts) == 1 else '.'.join(stripped_parts + ['__init__'])
+        expected_leaf = '__init__' if len(rel.parts) == 1 else f"{stripped_parts[-1]}.__init__"
+
+        expected_candidates: List[str] = []
+        for candidate in (expected_full, expected_stripped, expected_leaf):
+            if candidate not in expected_candidates:
+                expected_candidates.append(candidate)
+        expected_preferred = expected_stripped if has_numbered else expected_full
         
         data = read_nb(nb)
         found = find_default_exp(data)
+        found_is_module = False
+        if found:
+            parts = found.split(".")
+            if parts[-1] == "__init__":
+                module_path = lib_path.joinpath(*parts[:-1], "__init__.py")
+            else:
+                module_path = lib_path.joinpath(*parts).with_suffix(".py")
+            if module_path.exists():
+                found_is_module = True
         
         cell_idx, line_no = -1, -1
         for i, cell in enumerate(data.get('cells', [])):
@@ -89,11 +122,11 @@ def validate_inits(
             if cell_idx != -1:
                 break
         
-        if found != expected:
+        if found not in expected_candidates and not found_is_module:
             problems.append({
                 'notebook': str(nb.relative_to(p)),
                 'found': found,
-                'expected': expected,
+                'expected': expected_preferred,
                 'cell': cell_idx,
                 'line': line_no
             })
@@ -102,13 +135,13 @@ def validate_inits(
                 cells = data.get('cells', [])
                 if cell_idx != -1:
                     src = join_source(cells[cell_idx].get('source', []))
-                    new_src = re.sub(r'(#\|\s*default_exp\s+)[\w\.]+', f'\\1{expected}', src)
+                    new_src = re.sub(r'(#\|\s*default_exp\s+)[\w\.]+', f'\\1{expected_preferred}', src)
                     cells[cell_idx]['source'] = new_src.splitlines(True)
                 else:
                     new_cell = {
                         'cell_type': 'code',
                         'metadata': {},
-                        'source': [f'#| default_exp {expected}\n'],
+                        'source': [f'#| default_exp {expected_preferred}\n'],
                         'outputs': [],
                         'execution_count': None
                     }
@@ -126,6 +159,7 @@ def validate_inits(
         pretty = render_panel('validate_inits', 'All 00__init__ notebooks have correct default_exp')
     
     return {'ok': len(problems) == 0, 'problems': problems, 'fixed': fixed, 'pretty': pretty}
+
 
 # %% ../../nbs/11_tools/05_lint.ipynb 8
 def lint_rules(

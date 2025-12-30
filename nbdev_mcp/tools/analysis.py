@@ -27,6 +27,9 @@ from nbdev_mcp.utils.extlib import (
     index_project_externals as _index_project_externals,
     lookup_symbol as _lookup_symbol,
     scan_project_imports,
+    index_local_projects as _index_local_projects,
+    lookup_symbol_everywhere as _lookup_symbol_everywhere,
+    discover_editable_installs,
 )
 from nbdev_mcp.utils.depgraph import (
     generate_interactive_graph as _generate_interactive_graph,
@@ -36,8 +39,8 @@ from nbdev_mcp.utils.depgraph import (
 # %% auto 0
 __all__ = ['ANALYSIS_TOOL_ANNOTATIONS', 'UTILS_REGISTRY', 'analyze_dependency_order', 'dependency_tree', 'modidx_audit',
            'find_symbol', 'dependency_snapshot', 'export_diagram', 'index_external_libs', 'lookup_external_symbol',
-           'interactive_dependency_graph', 'add_analysis_tools', 'suggest_location', 'check_before_create',
-           'detect_migrations_needed', 'dependency_notebook', 'generate_api_docs']
+           'index_local_projects', 'interactive_dependency_graph', 'add_analysis_tools', 'suggest_location',
+           'check_before_create', 'detect_migrations_needed', 'dependency_notebook', 'generate_api_docs']
 
 # %% ../../nbs/11_tools/06_analysis.ipynb 6
 def analyze_dependency_order(
@@ -720,6 +723,54 @@ def lookup_external_symbol(
         }
 
 # %% ../../nbs/11_tools/06_analysis.ipynb 19
+def index_local_projects(
+    include_paths: Optional[List[str]] = None,
+    force: bool = False
+) -> Dict[str, Any]:
+    """Index local nbdev projects from editable pip installs.
+    
+    Discovers packages installed with `pip install -e .` and indexes
+    those that have a `_modidx.py` (nbdev projects) for cross-project
+    symbol lookup.
+    
+    Parameters
+    ----------
+    include_paths : List[str], optional
+        Additional paths to scan for nbdev projects.
+    force : bool
+        If True, refresh the cache even if already indexed.
+    
+    Returns
+    -------
+    Dict[str, Any]
+        Result dict with:
+        - ok: bool - Success status
+        - indexed: List[Dict] - Successfully indexed projects
+        - failed: List[Dict] - Projects that failed to index
+        - total_cached: int - Total projects in cache
+        - pretty: str - Formatted output
+    """
+    result = _index_local_projects(include_paths=include_paths, force=force)
+    
+    if result.get('indexed') or result.get('failed'):
+        rows = []
+        for proj in result.get('indexed', []):
+            cached = '(cached)' if proj.get('cached') else ''
+            rows.append([proj['package'], proj['path'], f'✓ indexed {cached}'])
+        for proj in result.get('failed', []):
+            rows.append([proj['package'], proj['path'], f'✗ {proj.get("reason", "failed")}'])
+        pretty = render_table(
+            f"index_local_projects: {len(result.get('indexed', []))} indexed",
+            ['Package', 'Path', 'Status'],
+            rows
+        )
+    else:
+        pretty = render_panel('index_local_projects', 'No editable installs found.')
+    
+    return {**result, 'pretty': pretty}
+
+
+# %% ../../nbs/11_tools/06_analysis.ipynb 21
 def interactive_dependency_graph(
     project: Optional[str] = None,
     output_path: Optional[str] = None,
@@ -791,7 +842,7 @@ def interactive_dependency_graph(
     except Exception as e:
         return {'ok': False, 'error': str(e)}
 
-# %% ../../nbs/11_tools/06_analysis.ipynb 21
+# %% ../../nbs/11_tools/06_analysis.ipynb 23
 # Tool annotation definitions for analysis tools
 ANALYSIS_TOOL_ANNOTATIONS = {
     'analyze_dependency_order': ToolAnnotations(
@@ -854,6 +905,12 @@ ANALYSIS_TOOL_ANNOTATIONS = {
         idempotentHint=True,
         openWorldHint=True
     ),
+    'index_local_projects': ToolAnnotations(
+        title="Index Local Projects",
+        readOnlyHint=True,
+        idempotentHint=True,
+        openWorldHint=False
+    ),
     'interactive_dependency_graph': ToolAnnotations(
         title="Interactive Dependency Graph",
         readOnlyHint=False,
@@ -899,6 +956,7 @@ def add_analysis_tools(mcp: FastMCP) -> None:
         ('generate_api_docs', generate_api_docs),
         ('index_external_libs', index_external_libs),
         ('lookup_external_symbol', lookup_external_symbol),
+        ('index_local_projects', index_local_projects),
         ('interactive_dependency_graph', interactive_dependency_graph),
         ('suggest_location', suggest_location),
         ('check_before_create', check_before_create),
@@ -909,7 +967,7 @@ def add_analysis_tools(mcp: FastMCP) -> None:
         annotations = ANALYSIS_TOOL_ANNOTATIONS.get(name)
         mcp.tool(name=name, annotations=annotations)(func)
 
-# %% ../../nbs/11_tools/06_analysis.ipynb 24
+# %% ../../nbs/11_tools/06_analysis.ipynb 26
 # Canonical locations for different types of utilities
 UTILS_REGISTRY = {
     'path_functions': '00_utils/08_paths.ipynb',
@@ -922,7 +980,7 @@ UTILS_REGISTRY = {
 }
 """Registry of canonical locations for utility types.""";
 
-# %% ../../nbs/11_tools/06_analysis.ipynb 25
+# %% ../../nbs/11_tools/06_analysis.ipynb 27
 def suggest_location(
     code: str,
     project: Optional[str] = None
@@ -1019,7 +1077,7 @@ def suggest_location(
         'pretty': pretty
     }
 
-# %% ../../nbs/11_tools/06_analysis.ipynb 26
+# %% ../../nbs/11_tools/06_analysis.ipynb 28
 def check_before_create(
     proposed_path: str,
     proposed_exports: Optional[List[str]] = None,
@@ -1122,7 +1180,7 @@ def check_before_create(
         'pretty': pretty
     }
 
-# %% ../../nbs/11_tools/06_analysis.ipynb 27
+# %% ../../nbs/11_tools/06_analysis.ipynb 29
 def detect_migrations_needed(
     project: Optional[str] = None
 ) -> Dict[str, Any]:
@@ -1229,7 +1287,7 @@ def detect_migrations_needed(
         'pretty': pretty
     }
 
-# %% ../../nbs/11_tools/06_analysis.ipynb 28
+# %% ../../nbs/11_tools/06_analysis.ipynb 30
 def dependency_notebook(
     project: Optional[str] = None,
     output_path: Optional[str] = None,
@@ -1358,7 +1416,7 @@ def dependency_notebook(
         'pretty': pretty
     }
 
-# %% ../../nbs/11_tools/06_analysis.ipynb 29
+# %% ../../nbs/11_tools/06_analysis.ipynb 31
 def generate_api_docs(
     project: Optional[str] = None,
     output_path: Optional[str] = None,
