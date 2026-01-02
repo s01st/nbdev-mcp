@@ -543,11 +543,16 @@ def lookup_symbol(symbol: str, packages: Optional[List[str]] = None) -> Optional
 # %% ../../nbs/00_utils/13_extlib.ipynb 23
 import subprocess
 
-def discover_editable_installs() -> Dict[str, Path]:
+def discover_editable_installs(timeout: Optional[int] = None) -> Dict[str, Path]:
     """Discover packages installed with `pip install -e .`.
     
     Queries pip for editable installs in the current environment.
     
+    Parameters
+    ----------
+    timeout : int, optional
+        Timeout in seconds for the pip query (default from config/environment).
+
     Returns
     -------
     Dict[str, Path]
@@ -555,11 +560,16 @@ def discover_editable_installs() -> Dict[str, Path]:
     """
     editables: Dict[str, Path] = {}
     
+    from nbdev_mcp.utils.config import get_config
+    cfg = get_config()
+    if timeout is None:
+        timeout = cfg.timeout_discover_editables
+    
     try:
         # Use pip list --editable to find editable installs
         result = subprocess.run(
             [sys.executable, '-m', 'pip', 'list', '--editable', '--format=json'],
-            capture_output=True, text=True, timeout=30
+            capture_output=True, text=True, timeout=timeout
         )
         if result.returncode == 0:
             packages = json.loads(result.stdout)

@@ -737,7 +737,7 @@ def execute_cell(
     project: Optional[str] = None,
     notebook: str = '',
     cell_index: int = 0,
-    timeout: int = 60
+    timeout: Optional[int] = None
 ) -> Dict[str, Any]:
     """Execute a specific cell from a notebook and return its output.
     
@@ -753,7 +753,7 @@ def execute_cell(
     cell_index : int
         The 0-based index of the cell to execute.
     timeout : int, optional
-        Execution timeout in seconds (default 60).
+        Execution timeout in seconds (default from config/environment).
     
     Returns
     -------
@@ -770,11 +770,16 @@ def execute_cell(
     """
     from nbdev_mcp.utils.paths import nbs_dir, resolve_selector, read_nb, write_nb
     from nbdev_mcp.utils.nb import join_source
+    from nbdev_mcp.utils.config import get_config
     
     try:
         p = resolve_selector(project)
     except Exception as e:
         return {'ok': False, 'error': str(e)}
+    
+    cfg = get_config()
+    if timeout is None:
+        timeout = cfg.timeout_execute_cell
     
     # Find the notebook
     nbs = nbs_dir(p)

@@ -457,7 +457,8 @@ import shutil
 def analyze_remote(
     url: str,
     branch: str = "main",
-    shallow: bool = True
+    shallow: bool = True,
+    timeout: Optional[int] = None
 ) -> Dict[str, Any]:
     """Tool: Analyze a remote nbdev project without permanent cloning.
     
@@ -469,11 +470,17 @@ def analyze_remote(
         url: GitHub URL (https://github.com/user/repo) or shorthand (user/repo).
         branch: Branch to analyze (default: main).
         shallow: If True, do a shallow clone for faster analysis.
+        timeout: Timeout in seconds for cloning (default from config/environment).
     
     Returns:
         Result dict with project info, structure, and analysis.
     """
     import subprocess
+    from nbdev_mcp.utils.config import get_config
+    
+    cfg = get_config()
+    if timeout is None:
+        timeout = cfg.timeout_analyze_remote
     
     # Normalize URL
     if not url.startswith('http'):
@@ -495,7 +502,7 @@ def analyze_remote(
             cmd.extend(['--depth', '1'])
         cmd.extend(['-b', branch, url, str(clone_path)])
         
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
         if result.returncode != 0:
             return {
                 'ok': False,

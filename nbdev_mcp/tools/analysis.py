@@ -312,6 +312,8 @@ def modidx_audit(
 ) -> Dict[str, Any]:
     """Audit _modidx.py for duplicate exports, private symbols, and numbering.
     
+    Dunder names (e.g., __init__) are allowed and not treated as private.
+    
     Parameters
     ----------
     project : str, optional
@@ -344,7 +346,8 @@ def modidx_audit(
         for sym, meta in entries.items():
             sym_to_mods.setdefault(sym, []).append(mod)
             name = sym.split(".")[-1]
-            if name.startswith("_") and name not in ("__init__",):
+            is_dunder = name.startswith("__") and name.endswith("__")
+            if name.startswith("_") and not is_dunder:
                 private.append({"symbol": sym, "module": mod})
             src = meta.get("source") if isinstance(meta, dict) else None
             if src:
@@ -1479,7 +1482,7 @@ def generate_api_docs(
             for node in ast.iter_child_nodes(tree):
                 if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                     name = node.name
-                    if not include_private and name.startswith('_'):
+                    if not include_private and name.startswith('_') and not (name.startswith('__') and name.endswith('__')):
                         continue
                     
                     # Get docstring
@@ -1516,7 +1519,7 @@ def generate_api_docs(
                     
                 elif isinstance(node, ast.ClassDef):
                     name = node.name
-                    if not include_private and name.startswith('_'):
+                    if not include_private and name.startswith('_') and not (name.startswith('__') and name.endswith('__')):
                         continue
                     
                     docstring = ast.get_docstring(node) or ''
@@ -1535,7 +1538,7 @@ def generate_api_docs(
                     methods = []
                     for item in node.body:
                         if isinstance(item, ast.FunctionDef):
-                            if not include_private and item.name.startswith('_') and item.name != '__init__':
+                            if not include_private and item.name.startswith('_') and not (item.name.startswith('__') and item.name.endswith('__')):
                                 continue
                             method_doc = ast.get_docstring(item) or ''
                             methods.append({

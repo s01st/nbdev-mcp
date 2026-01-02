@@ -12,12 +12,22 @@
 
 6. Match package hierarchy: notebook path `{nbs_path}/a/b/` → `#| default_exp a.b.<module>`; if the notebook is `00__init__.ipynb`, use `a.b.__init__`.
 
-7. Prefer imports over duplication; if you add a helper, ensure downstream callers import it instead of copying logic.
+7. `nbs/index.ipynb` becomes README.md and does not need `default_exp`.
 
-8. When a block is 5–10 lines of control flow, extract a small utility and call it; keep top-level functions small.
+8. Prefer imports over duplication; if you add a helper, ensure downstream callers import it instead of copying logic.
 
-9. After edits, run `nbdev_export` and appropriate tests (`pytest` or `nbdev_test`).
+9. When a block is 5–10 lines of control flow, extract a small utility and call it; keep top-level functions small.
 
-10. Review `{lib}/_modidx.py` (or run `modidx_audit` / `dependency_snapshot`) to confirm exports are unique, non-private, and notebooks are numbered.
+10. After edits, run `nbdev_export` and appropriate tests (`pytest` or `nbdev_test`).
 
-11. Keep export/cleanup cells (e.g., `#| hide\nimport nbdev; nbdev.nbdev_export()`) at the end; place new code cells above them and add a fitting markdown subsection heading.
+11. Review `{lib}/_modidx.py` (or run `modidx_audit` / `dependency_snapshot`) to confirm exports are unique, non-private, and notebooks are numbered.
+
+12. Dead-code reports are signals: some symbols are used in tutorials/docs, but unused exports can also indicate duplication.
+
+13. Keep living docs current: `ROADMAP.md`, `TODOs.md`, `*_PLAN.md`, and agent docs under `.claude/` or `.codex/`.
+
+14. Put all scripting/CLI logic in `nbs/` and expose it via `settings.ini` (`console_scripts`); avoid ad-hoc scripts outside nbdev.
+
+15. Repo-level `.md` files can be added to `nbs/index.ipynb` as markdown cells (use `split_markdown_cells` to convert).
+
+16. Keep export/cleanup cells (e.g., `#| hide\nimport nbdev; nbdev.nbdev_export()`) at the end; place new code cells above them and add a fitting markdown subsection heading.

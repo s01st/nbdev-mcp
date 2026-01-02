@@ -173,6 +173,7 @@ def lint_rules(
     - Relative imports (should be absolute)
     - README.md being generated
     - Duplicate exports across notebooks
+    - Private exported symbols (leading underscore), except dunder names
     
     Parameters
     ----------
@@ -230,24 +231,61 @@ def lint_rules(
                 })
             
             # Track exports for duplicate detection
-            has_export = bool(re.search(r'#\|\s*export\s*$', src, re.MULTILINE))
+            has_export = bool(re.search(r"#\|\s*export\s*$", src, re.MULTILINE))
             if has_export:
                 # Extract function and class names
-                for m in re.finditer(r'^\s*def\s+(\w+)\s*\(', src, re.MULTILINE):
+                for m in re.finditer(r"^\s*def\s+(\w+)\s*\(", src, re.MULTILINE):
                     name = m.group(1)
                     export_locations.setdefault(name, []).append({
-                        'notebook': str(nb.relative_to(p)),
-                        'cell': i,
-                        'module': mod
+                        "notebook": str(nb.relative_to(p)),
+                        "cell": i,
+                        "module": mod
                     })
-                for m in re.finditer(r'^\s*class\s+(\w+)\s*[\(:]', src, re.MULTILINE):
+                    if name.startswith("_") and not (name.startswith("__") and name.endswith("__")):
+                        issues.append({
+                            "rule": "private_export",
+                            "symbol": name,
+                            "notebook": str(nb.relative_to(p)),
+                            "cell": i,
+                            "message": "Private export {} found. Avoid private names; dunder methods like __init__ are ok.".format(name)
+                        })
+                for m in re.finditer(r"^\s*class\s+(\w+)\s*[\(:]", src, re.MULTILINE):
                     name = m.group(1)
                     export_locations.setdefault(name, []).append({
-                        'notebook': str(nb.relative_to(p)),
-                        'cell': i,
-                        'module': mod
+                        "notebook": str(nb.relative_to(p)),
+                        "cell": i,
+                        "module": mod
                     })
-            
+                    if name.startswith("_") and not (name.startswith("__") and name.endswith("__")):
+                        issues.append({
+                            "rule": "private_export",
+                            "symbol": name,
+                            "notebook": str(nb.relative_to(p)),
+                            "cell": i,
+                            "message": "Private export {} found. Avoid private names; dunder methods like __init__ are ok.".format(name)
+                        })
+                # Extract assigned names (module-level vars/constants)
+                try:
+                    import ast
+                    tree = ast.parse(src)
+                except SyntaxError:
+                    tree = None
+                if tree is not None:
+                    for node in tree.body:
+                        if isinstance(node, (ast.Assign, ast.AnnAssign)):
+                            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+                            for tgt in targets:
+                                if isinstance(tgt, ast.Name):
+                                    name = tgt.id
+                                    if name.startswith("_") and not (name.startswith("__") and name.endswith("__")):
+                                        issues.append({
+                                            "rule": "private_export",
+                                            "symbol": name,
+                                            "notebook": str(nb.relative_to(p)),
+                                            "cell": i,
+                                            "message": "Private export {} found. Avoid private names; dunder methods like __init__ are ok.".format(name)
+                                        })
+
             # Check for relative imports
             new_lines: List[str] = []
             line_changed = False
@@ -761,7 +799,8 @@ def lint_private_attributes(
     """Flag private attributes (self._xxx) in exported classes.
     
     MCP tools should be stateless. Private attributes suggest hidden state
-    that persists between calls, which breaks the MCP model.
+    that persists between calls, which breaks the MCP model. Dunder
+    attributes like __class__ are allowed.
     
     Parameters
     ----------
@@ -799,6 +838,8 @@ def lint_private_attributes(
             for line_no, line in enumerate(src.splitlines(), 1):
                 for m in private_attr_pattern.finditer(line):
                     attr_name = m.group(1)
+                    if attr_name.startswith("__") and attr_name.endswith("__"):
+                        continue
                     if attr_name not in allowed:
                         try:
                             tree = ast.parse(src)
@@ -1069,7 +1110,9 @@ def lint_dead_exports(
     """Find exported symbols that are never imported elsewhere.
     
     Scans all notebooks to find exports that no other notebook imports.
-    These are potential dead code that could be removed.
+    These are potential dead code that could be removed. Dead exports
+    are not always bad (e.g., tutorials/docs), but they can also signal
+    duplication when a new symbol is introduced and used instead.
     
     Parameters
     ----------
@@ -1207,6 +1250,7 @@ def lint_dead_exports(
     
     # Sort by notebook, then symbol
     dead_exports.sort(key=lambda x: (x['notebook'], x['symbol']))
+    note = "Dead exports are not always bad (tutorials/docs), but they can signal duplication if a newer symbol is used instead."
     
     if dead_exports:
         rows = [[it['symbol'], it['type'], it['notebook'], it['module']]
@@ -1216,6 +1260,7 @@ def lint_dead_exports(
             ['Symbol', 'Type', 'Notebook', 'Module'],
             rows
         )
+        pretty += '\n' + render_panel('lint_dead_exports', note)
     else:
         pretty = render_panel('lint_dead_exports', 'No dead exports found - all exports are used.')
     
@@ -1223,6 +1268,7 @@ def lint_dead_exports(
         'ok': len(dead_exports) == 0,
         'dead_exports': dead_exports,
         'total': len(dead_exports),
+        'note': note,
         'total_exports': sum(len(syms) for syms in exports_by_module.values()),
         'pretty': pretty
     }

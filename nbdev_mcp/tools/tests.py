@@ -29,7 +29,7 @@ __all__ = ['TESTS_TOOL_ANNOTATIONS', 'run_tutorials', 'scan_notebook_errors', 'g
 # %% ../../nbs/11_tools/07_tests.ipynb 6
 def run_tutorials(
     project: Optional[str] = None,
-    timeout: int = 600,
+    timeout: Optional[int] = None,
     allow_errors: bool = False
 ) -> Dict[str, Any]:
     """Execute tutorial notebooks to verify they run without errors.
@@ -41,7 +41,7 @@ def run_tutorials(
     project : str, optional
         Project path or alias. Uses current project if not specified.
     timeout : int
-        Timeout in seconds per notebook (default: 600).
+        Timeout in seconds per notebook (default from config/environment).
     allow_errors : bool
         If True, continue even if a notebook fails.
     
@@ -50,10 +50,16 @@ def run_tutorials(
     Dict[str, Any]
         Result with 'results' list of per-notebook outcomes.
     """
+    from nbdev_mcp.utils.config import get_config
+
     try:
         p = resolve_selector(project)
     except Exception as e:
         return {'ok': False, 'error': str(e)}
+
+    cfg = get_config()
+    if timeout is None:
+        timeout = cfg.timeout_run_tutorials
     
     tuts = tutorials_dir(p)
     if not tuts.exists():

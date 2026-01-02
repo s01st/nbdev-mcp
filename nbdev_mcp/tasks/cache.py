@@ -560,6 +560,9 @@ def get_orphan_symbols(
 ) -> Dict[str, Any]:
     """Get symbols with zero imports (candidates for removal).
     
+    Orphans are not always bad (they can be used in tutorials/docs), but
+    they can signal duplication when a new symbol is introduced instead.
+    
     Parameters
     ----------
     project : str, optional
@@ -583,10 +586,13 @@ def get_orphan_symbols(
     # Sort by line count (larger orphans are more concerning)
     orphans.sort(key=lambda s: s.line_count, reverse=True)
     
+    note = "Orphan symbols are not always bad (tutorials/docs), but they can signal duplication when a new symbol replaces an older one."
+    
     return {
         'ok': True,
         'orphans': [s.to_dict() for s in orphans],
-        'total_lines': sum(s.line_count for s in orphans)
+        'total_lines': sum(s.line_count for s in orphans),
+        'note': note
     }
 
 
@@ -662,7 +668,8 @@ def add_cache_tools(mcp: FastMCP) -> None:
     ) -> Dict[str, Any]:
         """Find symbols with zero imports (dead code candidates).
         
-        Excludes trivial constants. Useful for cleanup.
+        Excludes trivial constants. Useful for cleanup. Orphans are not
+        always bad (tutorials/docs), but can indicate duplication.
         """
         return get_orphan_symbols(project, min_lines)
     

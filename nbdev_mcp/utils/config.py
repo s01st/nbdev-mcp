@@ -10,17 +10,25 @@ from pathlib import Path
 from types import SimpleNamespace
 
 # %% auto 0
-__all__ = ['DEFAULT_CONFIG', 'NBMCP_CONFIG', 'CURRENT_PROJECT', 'BOOKMARKS_PATH', 'EXPECTED_PROMPT_TEMPLATES', 'DotConfig',
-           'configure', 'get_config', 'get_current_project', 'set_current_project', 'find_config_dir', 'load_bookmarks',
-           'save_bookmarks']
+__all__ = ['DEFAULT_CONFIG', 'NBMCP_CONFIG', 'CURRENT_PROJECT', 'BOOKMARKS_PATH', 'EXPECTED_PROMPT_TEMPLATES', 'env_int',
+           'DotConfig', 'configure', 'get_config', 'get_current_project', 'set_current_project', 'find_config_dir',
+           'load_bookmarks', 'save_bookmarks']
 
 # %% ../../nbs/00_utils/04_config.ipynb 6
+def env_int(name: str, default: int) -> int:
+    """Return an int env value with a safe fallback."""
+    try:
+        return int(os.environ.get(name, default))
+    except (TypeError, ValueError):
+        return default
+
+
 class DotConfig(dict):
-    '''Dot-accessible configuration with dictionary semantics.
+    """Dot-accessible configuration with dictionary semantics.
     
     A dictionary subclass that allows attribute-style access to keys.
-    Useful for configuration objects where ``config.key`` is more
-    readable than ``config['key']``.
+    Useful for configuration objects where config.key is more
+    readable than config['key'].
     
     Examples
     --------
@@ -30,7 +38,7 @@ class DotConfig(dict):
     >>> cfg.new_key = 'value'
     >>> cfg['new_key']
     'value'
-    '''
+    """
     def __getattr__(self, key: str):
         try:
             return self[key]
@@ -41,25 +49,29 @@ class DotConfig(dict):
         self[key] = value
 
     def copy(self) -> "DotConfig":
-        '''Return a shallow copy as another DotConfig.
+        """Return a shallow copy as another DotConfig.
         
         Returns
         -------
         DotConfig
             A new DotConfig instance with the same key-value pairs.
-        '''
+        """
         return DotConfig(self)
 
     def update_from_env(self) -> None:
-        '''Refresh config from environment variables if present.
+        """Refresh config from environment variables if present.
         
-        Updates log_level, prompt_dir, and env_dir_name from
-        NBMCP_LOG_LEVEL, NBMCP_PROMPT_DIR, and NBMCP_ENV_DIR
-        environment variables respectively.
-        '''
+        Updates log_level, prompt_dir, env_dir_name, and timeouts from
+        NBMCP_LOG_LEVEL, NBMCP_PROMPT_DIR, NBMCP_ENV_DIR, and timeout
+        env vars (NBMCP_TIMEOUT_*).
+        """
         self.log_level = os.environ.get("NBMCP_LOG_LEVEL", self.log_level)
         self.prompt_dir = os.environ.get("NBMCP_PROMPT_DIR", self.prompt_dir)
         self.env_dir_name = os.environ.get("NBMCP_ENV_DIR", self.env_dir_name)
+        self.timeout_analyze_remote = env_int("NBMCP_TIMEOUT_ANALYZE_REMOTE", self.timeout_analyze_remote)
+        self.timeout_execute_cell = env_int("NBMCP_TIMEOUT_EXECUTE_CELL", self.timeout_execute_cell)
+        self.timeout_discover_editables = env_int("NBMCP_TIMEOUT_DISCOVER_EDITABLES", self.timeout_discover_editables)
+        self.timeout_run_tutorials = env_int("NBMCP_TIMEOUT_RUN_TUTORIALS", self.timeout_run_tutorials)
 
 
 DEFAULT_CONFIG = DotConfig({
@@ -67,14 +79,18 @@ DEFAULT_CONFIG = DotConfig({
     "prompt_dir": os.environ.get("NBMCP_PROMPT_DIR", "prompt_templates"),
     "env_dir_name": os.environ.get("NBMCP_ENV_DIR", "Environments"),
     "max_tree_files": 600,
+    "timeout_analyze_remote": env_int("NBMCP_TIMEOUT_ANALYZE_REMOTE", 60),
+    "timeout_execute_cell": env_int("NBMCP_TIMEOUT_EXECUTE_CELL", 60),
+    "timeout_discover_editables": env_int("NBMCP_TIMEOUT_DISCOVER_EDITABLES", 30),
+    "timeout_run_tutorials": env_int("NBMCP_TIMEOUT_RUN_TUTORIALS", 600),
 })
-'''Default settings used by nbdev-mcp. Environment variables can override these defaults.'''
+"""Default settings used by nbdev-mcp. Environment variables can override these defaults."""
 
 NBMCP_CONFIG = DEFAULT_CONFIG
-'''Singleton configuration shared across the package. Dot-accessible (``NBMCP_CONFIG.log_level``).'''
+"""Singleton configuration shared across the package. Dot-accessible (NBMCP_CONFIG.log_level)."""
 
 CURRENT_PROJECT: Optional[Path] = None
-'''Currently selected nbdev project; ``None`` until explicitly set.'''
+"""Currently selected nbdev project; None until explicitly set."""
 
 
 # %% ../../nbs/00_utils/04_config.ipynb 7
