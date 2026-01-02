@@ -72,6 +72,8 @@ class DotConfig(dict):
         self.timeout_execute_cell = env_int("NBMCP_TIMEOUT_EXECUTE_CELL", self.timeout_execute_cell)
         self.timeout_discover_editables = env_int("NBMCP_TIMEOUT_DISCOVER_EDITABLES", self.timeout_discover_editables)
         self.timeout_run_tutorials = env_int("NBMCP_TIMEOUT_RUN_TUTORIALS", self.timeout_run_tutorials)
+        self.timeout_duplicate_scan = env_int("NBMCP_TIMEOUT_DUPLICATE_SCAN", self.timeout_duplicate_scan)
+        self.timeout_semantic_duplicates = env_int("NBMCP_TIMEOUT_SEMANTIC_DUPLICATES", self.timeout_semantic_duplicates)
 
 
 DEFAULT_CONFIG = DotConfig({
@@ -83,6 +85,8 @@ DEFAULT_CONFIG = DotConfig({
     "timeout_execute_cell": env_int("NBMCP_TIMEOUT_EXECUTE_CELL", 60),
     "timeout_discover_editables": env_int("NBMCP_TIMEOUT_DISCOVER_EDITABLES", 30),
     "timeout_run_tutorials": env_int("NBMCP_TIMEOUT_RUN_TUTORIALS", 600),
+    "timeout_duplicate_scan": env_int("NBMCP_TIMEOUT_DUPLICATE_SCAN", 600),
+    "timeout_semantic_duplicates": env_int("NBMCP_TIMEOUT_SEMANTIC_DUPLICATES", 600),
 })
 """Default settings used by nbdev-mcp. Environment variables can override these defaults."""
 

@@ -11,6 +11,7 @@ from collections import defaultdict
 import difflib
 import re
 import hashlib
+import time
 
 from mcp.server.fastmcp import FastMCP
 
@@ -128,7 +129,8 @@ class MergeRoadmap:
 # %% ../../nbs/12_tasks/03_dedup.ipynb 10
 def find_functional_duplicates(
     graph: DependencyGraph,
-    min_similarity: float = 0.8
+    min_similarity: float = 0.8,
+    deadline: Optional[float] = None
 ) -> List[DuplicateGroup]:
     """Find symbols with identical/similar behavior but different names.
     
@@ -140,6 +142,8 @@ def find_functional_duplicates(
         The dependency graph to analyze.
     min_similarity : float
         Minimum similarity threshold.
+    deadline : float, optional
+        Absolute time limit (time.monotonic), if provided.
     
     Returns
     -------
@@ -174,11 +178,15 @@ def find_functional_duplicates(
     # Find similar (not exact) duplicates
     checked = set()
     for i, sym1 in enumerate(symbols):
+        if deadline is not None and time.monotonic() > deadline:
+            return groups
         if sym1.line_count < 5 or sym1.id in checked:
             continue
         
         similar = []
         for sym2 in symbols[i+1:]:
+            if deadline is not None and time.monotonic() > deadline:
+                return groups
             if sym2.line_count < 5 or sym2.id in checked:
                 continue
             if sym1.kind != sym2.kind:
@@ -221,7 +229,8 @@ def find_functional_duplicates(
 
 # %% ../../nbs/12_tasks/03_dedup.ipynb 11
 def find_named_duplicates(
-    graph: DependencyGraph
+    graph: DependencyGraph,
+    deadline: Optional[float] = None
 ) -> List[DuplicateGroup]:
     """Find symbols with same/similar names across modules.
     
@@ -235,6 +244,8 @@ def find_named_duplicates(
     ----------
     graph : DependencyGraph
         The dependency graph to analyze.
+    deadline : float, optional
+        Absolute time limit (time.monotonic), if provided.
     
     Returns
     -------
@@ -247,11 +258,15 @@ def find_named_duplicates(
     # Group by base name (without leading underscores)
     name_groups: Dict[str, List[SymbolNode]] = defaultdict(list)
     for sym in symbols:
+        if deadline is not None and time.monotonic() > deadline:
+            return groups
         base_name = sym.name.lstrip('_')
         name_groups[base_name].append(sym)
     
     # Find exact name matches (different modules)
     for base_name, syms in name_groups.items():
+        if deadline is not None and time.monotonic() > deadline:
+            return groups
         if len(syms) > 1:
             # Check if they're in different modules
             modules = set(s.module for s in syms)
@@ -270,6 +285,8 @@ def find_named_duplicates(
     
     # Find private/public pairs in same module
     for sym in symbols:
+        if deadline is not None and time.monotonic() > deadline:
+            return groups
         if sym.name.startswith('_') and not sym.name.startswith('__'):
             public_name = sym.name[1:]
             public_id = f"{sym.module}.{public_name}"
@@ -349,7 +366,8 @@ def _get_embedding_device() -> str:
 def find_semantic_duplicates(
     graph: DependencyGraph,
     min_similarity: float = 0.85,
-    model_name: str = 'all-MiniLM-L6-v2'
+    model_name: str = 'all-MiniLM-L6-v2',
+    deadline: Optional[float] = None
 ) -> List[DuplicateGroup]:
     """Find symbols with similar purpose using embeddings.
     
@@ -364,6 +382,8 @@ def find_semantic_duplicates(
         Minimum cosine similarity threshold.
     model_name : str
         Sentence-transformers model name.
+    deadline : float, optional
+        Absolute time limit (time.monotonic), if provided.
     
     Returns
     -------
@@ -376,6 +396,9 @@ def find_semantic_duplicates(
     except ImportError:
         return []  # sentence-transformers not installed
     
+    if deadline is not None and time.monotonic() > deadline:
+        return []
+
     device = _get_embedding_device()
     model = SentenceTransformer(model_name, device=device)
     
@@ -406,11 +429,15 @@ def find_semantic_duplicates(
     checked = set()
     
     for i, sym1 in enumerate(symbols):
+        if deadline is not None and time.monotonic() > deadline:
+            return groups
         if sym1.id in checked:
             continue
         
         similar = []
         for j, sym2 in enumerate(symbols[i+1:], i+1):
+            if deadline is not None and time.monotonic() > deadline:
+                return groups
             if sym2.id in checked:
                 continue
             if sym1.kind != sym2.kind:
@@ -445,6 +472,7 @@ def find_semantic_duplicates(
                 checked.add(s.id)
     
     return groups
+
 
 # %% ../../nbs/12_tasks/03_dedup.ipynb 14
 def find_optimal_location(
@@ -645,7 +673,8 @@ def find_all_duplicates(
     include_functional: bool = True,
     include_named: bool = True,
     include_semantic: bool = False,
-    min_similarity: float = 0.8
+    min_similarity: float = 0.8,
+    timeout: Optional[int] = None
 ) -> Dict[str, Any]:
     """Find all duplicate symbols in a project.
     
@@ -661,11 +690,13 @@ def find_all_duplicates(
         Include semantically similar code (EXPENSIVE).
     min_similarity : float
         Minimum similarity threshold.
+    timeout : int, optional
+        Max seconds to spend (soft limit).
     
     Returns
     -------
     Dict[str, Any]
-        Grouped duplicates by type.
+        Grouped duplicates by type, plus timing metadata.
     """
     p = resolve_selector(project)
     cache = ModidxCacheManager.get(p)
@@ -680,25 +711,37 @@ def find_all_duplicates(
         'semantic': []
     }
     
+    start = time.monotonic()
+    deadline = start + timeout if timeout and timeout > 0 else None
+    timed_out = False
+    
     if include_functional:
-        groups = find_functional_duplicates(graph, min_similarity)
+        groups = find_functional_duplicates(graph, min_similarity, deadline=deadline)
         results['functional'] = [g.to_dict() for g in groups]
+        timed_out = deadline is not None and time.monotonic() > deadline
     
-    if include_named:
-        groups = find_named_duplicates(graph)
+    if include_named and not timed_out:
+        groups = find_named_duplicates(graph, deadline=deadline)
         results['named'] = [g.to_dict() for g in groups]
+        timed_out = deadline is not None and time.monotonic() > deadline
     
-    if include_semantic:
-        groups = find_semantic_duplicates(graph, min_similarity)
+    if include_semantic and not timed_out:
+        groups = find_semantic_duplicates(graph, min_similarity, deadline=deadline)
         results['semantic'] = [g.to_dict() for g in groups]
+        timed_out = deadline is not None and time.monotonic() > deadline
     
     total = sum(len(v) for v in results.values())
+    elapsed = round(time.monotonic() - start, 2)
     
     return {
         'ok': True,
         'total_groups': total,
-        'duplicates': results
+        'duplicates': results,
+        'timed_out': timed_out,
+        'timeout': timeout,
+        'elapsed_seconds': elapsed
     }
+
 
 # %% ../../nbs/12_tasks/03_dedup.ipynb 19
 def add_dedup_tools(mcp: FastMCP) -> None:
@@ -715,7 +758,8 @@ def add_dedup_tools(mcp: FastMCP) -> None:
         project: Optional[str] = None,
         include_functional: bool = True,
         include_named: bool = True,
-        similarity_threshold: float = 0.8
+        similarity_threshold: float = 0.8,
+        timeout: Optional[int] = None
     ) -> Dict[str, Any]:
         """Find duplicate code across the project.
         
@@ -725,12 +769,17 @@ def add_dedup_tools(mcp: FastMCP) -> None:
         
         NOTE: Semantic analysis requires separate confirmation.
         """
+        from nbdev_mcp.utils.config import get_config
+        cfg = get_config()
+        if timeout is None:
+            timeout = cfg.timeout_duplicate_scan
         return find_all_duplicates(
             project,
             include_functional=include_functional,
             include_named=include_named,
             include_semantic=False,  # Requires separate call
-            min_similarity=similarity_threshold
+            min_similarity=similarity_threshold,
+            timeout=timeout
         )
     
     @mcp.tool()
@@ -738,12 +787,16 @@ def add_dedup_tools(mcp: FastMCP) -> None:
         project: Optional[str] = None,
         similarity_threshold: float = 0.85,
         model: str = 'all-MiniLM-L6-v2',
-        i_confirm_this_is_expensive: bool = False
+        i_confirm_this_is_expensive: bool = False,
+        timeout: Optional[int] = None
     ) -> Dict[str, Any]:
         """Find semantically similar code using embeddings.
         
         EXPENSIVE OPERATION - Uses local embeddings with MPS/CUDA.
         Set i_confirm_this_is_expensive=True to run.
+        
+        timeout : int, optional
+            Max seconds to spend (default from config/environment).
         """
         if not i_confirm_this_is_expensive:
             return {
@@ -753,16 +806,28 @@ def add_dedup_tools(mcp: FastMCP) -> None:
                 'model': model
             }
         
+        from nbdev_mcp.utils.config import get_config
+        cfg = get_config()
+        if timeout is None:
+            timeout = cfg.timeout_semantic_duplicates
+
         p = resolve_selector(project)
         cache = ModidxCacheManager.get(p)
         graph = cache.dependency_graph or build_graph(str(p))
-        
-        groups = find_semantic_duplicates(graph, similarity_threshold, model)
-        
+
+        deadline = time.monotonic() + timeout if timeout and timeout > 0 else None
+        start = time.monotonic()
+        groups = find_semantic_duplicates(graph, similarity_threshold, model, deadline=deadline)
+        timed_out = deadline is not None and time.monotonic() > deadline
+        elapsed = round(time.monotonic() - start, 2)
+
         return {
-            'ok': True,
-            'device': _get_embedding_device(),
-            'groups': [g.to_dict() for g in groups]
+            "ok": True,
+            "device": _get_embedding_device(),
+            "groups": [g.to_dict() for g in groups],
+            "timed_out": timed_out,
+            "timeout": timeout,
+            "elapsed_seconds": elapsed
         }
     
     @mcp.tool()
