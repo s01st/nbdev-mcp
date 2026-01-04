@@ -136,6 +136,12 @@ def find_functional_duplicates(
     
     Uses AST hash comparison and structural similarity.
     
+    Notes
+    -----
+    Implementations of abstract base class methods are often expected to differ.
+    Treat them as duplicates only when a shared helper should be extracted
+    (e.g., forward_pass_ode vs forward_pass_sde), not just because they look similar.
+    
     Parameters
     ----------
     graph : DependencyGraph
@@ -227,6 +233,7 @@ def find_functional_duplicates(
     
     return groups
 
+
 # %% ../../nbs/12_tasks/03_dedup.ipynb 11
 def find_named_duplicates(
     graph: DependencyGraph,
@@ -239,6 +246,12 @@ def find_named_duplicates(
     - Private/public pairs (_name, name)
     - Near-matches (edit distance <= 2)
     - Common prefix/suffix variants (get_foo, fetch_foo)
+    
+    Notes
+    -----
+    Similar names are not proof of duplication. Require reasoning about intent.
+    Examples: diamonds_2d/diamonds_3d/diamonds_nd vs diamonds (generic),
+    or foo_numpy/foo_scipy/foo_torch vs foo (generic).
     
     Parameters
     ----------
@@ -348,6 +361,7 @@ def find_named_duplicates(
                 checked.add(s.id)
     
     return groups
+
 
 # %% ../../nbs/12_tasks/03_dedup.ipynb 12
 def _get_embedding_device() -> str:
@@ -768,6 +782,8 @@ def add_dedup_tools(mcp: FastMCP) -> None:
         - Similarly named symbols (same name, different modules)
         
         NOTE: Semantic analysis requires separate confirmation.
+        Duplicate findings are candidates only; confirm intent and design.
+        ABC method implementations and library-specific variants may be valid.
         """
         from nbdev_mcp.utils.config import get_config
         cfg = get_config()
@@ -915,3 +931,4 @@ def add_dedup_tools(mcp: FastMCP) -> None:
             'roadmap': roadmap.to_dict(),
             'warning': 'DO NOT execute merge without human confirmation!'
         }
+

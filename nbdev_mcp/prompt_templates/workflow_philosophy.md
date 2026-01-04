@@ -43,7 +43,7 @@ User: "Fix the bug in {lib}/core.py in the process_data function"
 └── utils.ipynb       ← Exports to {lib}/utils.py
 
 {lib}/                ← GENERATED CODE (do not edit!)
-├── _init__.py       ← Auto-generated
+├── __init__.py       ← Auto-generated
 ├── core.py           ← Auto-generated from core.ipynb
 └── utils.py          ← Auto-generated from utils.ipynb
 ```
@@ -62,8 +62,14 @@ User: "Fix the bug in {lib}/core.py in the process_data function"
 ## Remember:
 - Notebooks = code + narrative; keep long tests in `tests/` with pytest.
 - Prefer writing tests under `tests/` (pytest). Use `nbs/99_tests/` only for shared fixtures/mocks.
+- `nbs/index.ipynb` becomes README.md and does not need `default_exp`.
 - For long/expensive notebook examples, mark cells with `#| eval: false`.
 - Always export after editing notebooks.
 - Never manually edit generated files.
 - Use tools to find and edit source notebooks.
+- Avoid private names (leading underscore) for functions, classes, attributes, or vars; dunder methods like `__init__` are OK.
+- Dead-code reports are signals: some exports are used in tutorials/docs, but unused exports can also indicate duplication.
+- Keep living docs current: `ROADMAP.md`, `TODOs.md`, `*_PLAN.md`, and agent docs under `.claude/` or `.codex/`.
+- All scripting/CLI logic must live in `nbs/` and be exposed via `settings.ini` (`console_scripts`). Avoid ad-hoc scripts outside nbdev.
+- Repo-level `.md` files can be incorporated into `nbs/index.ipynb` as markdown cells (use `split_markdown_cells` to convert).
 - Do not add manual "Documentation" sections or call `show_doc()`; nbdev builds API docs from docstrings automatically.

@@ -1,12 +1,12 @@
 # nbdev quick how-to for {lib}
 
-- **Notebooks live in** `{nbs_path}/`. The `index.ipynb` becomes **README.md** and the docs home page.
+- **Notebooks live in** `{nbs_path}/`. The `index.ipynb` becomes **README.md** and the docs home page (no `default_exp` needed).
 - 
 - **Declare module** at top of notebook:
     ```python
     #| default_exp your_module_name
     ```
-- **Exports**: mark cells with `#| export` (to include in library) or `#| exporti` (to include as internal).
+- **Exports**: mark cells with `#| export` (to include in library) or `#| exporti` (to include as internal). Avoid private names (leading underscore); dunder methods like `__init__` are OK.
 
 - **Hide or control output**: `#| hide` to hide a cell, `#| echo: false` to hide code, `#| output: false` to hide outputs.
 
@@ -21,6 +21,10 @@
 - **Frontmatter**: Add YAML between `---` at the top or use the first cell (with `# Title` and possibly a description and key metadata).
 
 - **Cell granularity**: keep __one__ function/class per code cell; split markdown by headings (use the `split_markdown_cells` tool when converting large markdown blobs).
+
+- **Living docs**: keep `ROADMAP.md`, `TODOs.md`, `*_PLAN.md`, and agent docs under `.claude/` or `.codex/` current.
+- **Scripting/CLI**: put all scripting logic in `nbs/` and expose it via `settings.ini` (`console_scripts`), not ad-hoc scripts.
+- **Repo .mds**: you can add repo-level `.md` files to `nbs/index.ipynb` as markdown cells (use `split_markdown_cells`).
 
 - **Live reload**: Use autoreload in notebooks for iterative development:
     ```python

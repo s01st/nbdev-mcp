@@ -24,10 +24,12 @@
 
 12. Dead-code reports are signals: some symbols are used in tutorials/docs, but unused exports can also indicate duplication.
 
-13. Keep living docs current: `ROADMAP.md`, `TODOs.md`, `*_PLAN.md`, and agent docs under `.claude/` or `.codex/`.
+13. Duplicate analysis is heuristic: ABC method implementations and name variants may be intentional (e.g., diamonds_2d/3d/nd vs diamonds, foo_numpy/foo_torch vs foo); only merge when reasoning supports a shared helper.
 
-14. Put all scripting/CLI logic in `nbs/` and expose it via `settings.ini` (`console_scripts`); avoid ad-hoc scripts outside nbdev.
+14. Keep living docs current: `ROADMAP.md`, `TODOs.md`, `*_PLAN.md`, and agent docs under `.claude/` or `.codex/`.
 
-15. Repo-level `.md` files can be added to `nbs/index.ipynb` as markdown cells (use `split_markdown_cells` to convert).
+15. Put all scripting/CLI logic in `nbs/` and expose it via `settings.ini` (`console_scripts`); avoid ad-hoc scripts outside nbdev.
 
-16. Keep export/cleanup cells (e.g., `#| hide\nimport nbdev; nbdev.nbdev_export()`) at the end; place new code cells above them and add a fitting markdown subsection heading.
+16. Repo-level `.md` files can be added to `nbs/index.ipynb` as markdown cells (use `split_markdown_cells` to convert).
+
+17. Keep export/cleanup cells (e.g., `#| hide\nimport nbdev; nbdev.nbdev_export()`) at the end; place new code cells above them and add a fitting markdown subsection heading.
