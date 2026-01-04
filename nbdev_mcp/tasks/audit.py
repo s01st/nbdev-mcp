@@ -365,7 +365,10 @@ async def full_project_audit(
             severity='info',
             category='structure',
             notebook='project',
-            message=f'{orphan_count} symbols with 5+ lines have zero imports (potential dead code; may be used in tutorials/docs, can indicate duplication)',
+            message=(
+                f'{orphan_count} symbols with 5+ lines have zero imports '
+                '(potential dead code; weigh by module depth and tutorial usage; may be public API)'
+            ),
             suggestion='Run orphan_symbols tool for details'
         ))
     
@@ -377,6 +380,7 @@ async def full_project_audit(
     }
     
     return result
+
 
 # %% ../../nbs/12_tasks/02_audit.ipynb 12
 def symbol_audit(

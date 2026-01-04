@@ -21,7 +21,8 @@
 - Split long narrative with `####` in separate markdown cells.
 
 - Use NumPy-style docstrings (Parameters, Returns, Raises, Examples).
-- Dead-code reports are signals: some symbols are used in tutorials/docs, but unused exports can also indicate duplication.
+- Dead-code reports are signals: weigh by module depth and tutorial usage; tutorial usage implies public API and lowers concern.
+- The `tutorials/` directory is for tutorial notebooks only — do not write artifacts/outputs/cache there (use repo root or `~/Downloads/<repo>/`).
 - Keep living docs current: `ROADMAP.md`, `TODOs.md`, `*_PLAN.md`, and agent docs under `.claude/` or `.codex/`.
 - All scripting/CLI logic must live in `nbs/` and be exposed via `settings.ini` (`console_scripts`); avoid ad-hoc scripts outside nbdev.
 - Repo-level `.md` files can be added to `nbs/index.ipynb` as markdown cells (use `split_markdown_cells` to convert).

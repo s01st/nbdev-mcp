@@ -11,15 +11,18 @@ from collections import defaultdict
 import time
 import json
 import hashlib
+import ast
 
 from mcp.server.fastmcp import FastMCP
 
 from nbdev_mcp.utils.paths import (
-    resolve_selector, iter_notebooks, modidx_path, settings_dict
+    resolve_selector, iter_notebooks, modidx_path, settings_dict, read_nb, tutorials_dir
 )
+from ..utils.nb import join_source
 from nbdev_mcp.utils.depgraph import (
     build_graph, DependencyGraph, SymbolNode, Edge
 )
+
 
 # %% auto 0
 __all__ = ['CACHE_SNAPSHOT_DIR', 'SymbolStats', 'ModuleStats', 'LiveModidxCache', 'save_cache_snapshot', 'load_cache_snapshot',
@@ -563,6 +566,12 @@ def get_orphan_symbols(
     Orphans are not always bad (they can be used in tutorials/docs), but
     they can signal duplication when a new symbol is introduced instead.
     
+    Notes
+    -----
+    Dead-code analysis is weighted by module hierarchy and tutorial usage.
+    Lower-level (deeper) modules are more concerning, while tutorial usage
+    suggests public API and lowers concern.
+    
     Parameters
     ----------
     project : str, optional
@@ -578,21 +587,75 @@ def get_orphan_symbols(
     p = resolve_selector(project)
     cache = ModidxCacheManager.get(p)
     
-    orphans = [
+    # Scan tutorials for symbol usage (public API signals)
+    tuts = tutorials_dir(p)
+    tutorial_symbols: set = set()
+    if tuts.exists():
+        for nb in tuts.rglob('*.ipynb'):
+            data = read_nb(nb)
+            for cell in data.get('cells', []):
+                if cell.get('cell_type') != 'code':
+                    continue
+                src = join_source(cell.get('source', []))
+                if not src.strip():
+                    continue
+                try:
+                    tree = ast.parse(src)
+                except SyntaxError:
+                    continue
+                for node in ast.walk(tree):
+                    if isinstance(node, ast.Name):
+                        tutorial_symbols.add(node.id)
+                    elif isinstance(node, ast.Attribute):
+                        tutorial_symbols.add(node.attr)
+                    elif isinstance(node, ast.ImportFrom):
+                        for alias in node.names:
+                            if alias.name != '*':
+                                tutorial_symbols.add(alias.name)
+    
+    orphans_raw = [
         s for s in cache.symbol_stats.values()
         if s.import_count == 0 and s.line_count >= min_lines
     ]
     
-    # Sort by line count (larger orphans are more concerning)
-    orphans.sort(key=lambda s: s.line_count, reverse=True)
+    orphans: List[Dict[str, Any]] = []
+    for s in orphans_raw:
+        if not s.fqn:
+            continue
+        module = s.fqn.rsplit('.', 1)[0] if '.' in s.fqn else ''
+        name = s.fqn.split('.')[-1]
+        module_depth = len([part for part in module.split('.') if part]) if module else 0
+        used_in_tutorials = name in tutorial_symbols
+        concern_weight = module_depth
+        if used_in_tutorials:
+            concern_weight = max(0, concern_weight - 1)
+        entry = s.to_dict()
+        entry.update({
+            'module': module,
+            'symbol': name,
+            'module_depth': module_depth,
+            'used_in_tutorials': used_in_tutorials,
+            'concern_weight': concern_weight,
+        })
+        orphans.append(entry)
     
-    note = "Orphan symbols are not always bad (tutorials/docs), but they can signal duplication when a new symbol replaces an older one."
+    # Sort by weight, then line count
+    orphans.sort(key=lambda s: (s['concern_weight'], s['line_count']), reverse=True)
+    
+    note = (
+        "Orphan symbols are not always bad (tutorials/docs), but they can signal duplication. "
+        "Weights: deeper modules are more concerning; tutorial usage lowers concern."
+    )
     
     return {
         'ok': True,
-        'orphans': [s.to_dict() for s in orphans],
-        'total_lines': sum(s.line_count for s in orphans),
-        'note': note
+        'orphans': orphans,
+        'total_lines': sum(s['line_count'] for s in orphans),
+        'note': note,
+        'weighting': {
+            'tutorials_dir': str(tuts),
+            'rule': 'concern_weight = module_depth; subtract 1 if used in tutorials'
+        }
     }
 
 
@@ -626,6 +689,7 @@ def get_module_summary(
         'total_symbols': sum(m.symbol_count for m in modules),
         'total_lines': sum(m.total_lines for m in modules)
     }
+
 
 # %% ../../nbs/12_tasks/05_cache.ipynb 16
 def add_cache_tools(mcp: FastMCP) -> None:

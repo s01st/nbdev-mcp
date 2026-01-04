@@ -25,7 +25,7 @@ from nbdev_mcp.utils.re import (
 )
 from nbdev_mcp.utils.paths import (
     nbs_dir, settings_dict, resolve_selector, with_project, iter_notebooks,
-    read_nb, write_nb, abs_module_for_nb, resolve_relative,
+    read_nb, write_nb, abs_module_for_nb, resolve_relative, tutorials_dir,
 )
 from ..utils.nb import join_source, find_default_exp
 from ..utils.rich import render_table, render_panel
@@ -33,6 +33,7 @@ from nbdev_mcp.utils.nbformat import (
     read_notebook, write_notebook, has_standard_ending,
     ensure_standard_ending, fix_header_formatting, standardize_notebook,
 )
+
 
 # %% auto 0
 __all__ = ['LINT_TOOL_ANNOTATIONS', 'validate_inits', 'lint_rules', 'lint_main_guards', 'lint_imports', 'lint_types',
@@ -1114,6 +1115,12 @@ def lint_dead_exports(
     are not always bad (e.g., tutorials/docs), but they can also signal
     duplication when a new symbol is introduced and used instead.
     
+    Notes
+    -----
+    Dead-code analysis is weighted by module hierarchy and tutorial usage.
+    Lower-level (deeper) modules are more concerning, while tutorial usage
+    suggests public API and lowers concern.
+    
     Parameters
     ----------
     project : str, optional
@@ -1136,6 +1143,32 @@ def lint_dead_exports(
     ignore = set(ignore_patterns or [])
     # Common entry points that may not be imported
     ignore.update(['main', 'cli', 'app', 'run', 'serve'])
+    
+    # Scan tutorials for symbol usage (public API signals)
+    tuts = tutorials_dir(p)
+    tutorial_symbols: set = set()
+    if tuts.exists():
+        for nb in tuts.rglob('*.ipynb'):
+            data = read_nb(nb)
+            for cell in data.get('cells', []):
+                if cell.get('cell_type') != 'code':
+                    continue
+                src = join_source(cell.get('source', []))
+                if not src.strip():
+                    continue
+                try:
+                    tree = ast.parse(src)
+                except SyntaxError:
+                    continue
+                for node in ast.walk(tree):
+                    if isinstance(node, ast.Name):
+                        tutorial_symbols.add(node.id)
+                    elif isinstance(node, ast.Attribute):
+                        tutorial_symbols.add(node.attr)
+                    elif isinstance(node, ast.ImportFrom):
+                        for alias in node.names:
+                            if alias.name != '*':
+                                tutorial_symbols.add(alias.name)
     
     # Phase 1: Collect all exports per module
     exports_by_module: Dict[str, Dict[str, Dict[str, Any]]] = {}  # module -> {symbol -> {notebook, cell}}
@@ -1239,25 +1272,39 @@ def lint_dead_exports(
             )
             
             if not is_used:
+                module_rel = fq_mod.replace(lib + '.', '') if fq_mod.startswith(lib + '.') else fq_mod
+                module_depth = len([part for part in module_rel.split('.') if part]) if module_rel else 0
+                used_in_tutorials = sym_name in tutorial_symbols
+                concern_weight = module_depth
+                if used_in_tutorials:
+                    concern_weight = max(0, concern_weight - 1)
+                
                 dead_exports.append({
                     'symbol': sym_name,
                     'module': fq_mod,
                     'notebook': sym_info['notebook'],
                     'cell': sym_info['cell'],
                     'type': sym_info['type'],
+                    'used_in_tutorials': used_in_tutorials,
+                    'module_depth': module_depth,
+                    'concern_weight': concern_weight,
                     'message': f"'{sym_name}' exported from {fq_mod} but never imported"
                 })
     
-    # Sort by notebook, then symbol
-    dead_exports.sort(key=lambda x: (x['notebook'], x['symbol']))
-    note = "Dead exports are not always bad (tutorials/docs), but they can signal duplication if a newer symbol is used instead."
+    # Sort by weight, then notebook, then symbol
+    dead_exports.sort(key=lambda x: (-x['concern_weight'], x['notebook'], x['symbol']))
+    note = (
+        "Dead exports are not always bad (tutorials/docs), but they can signal duplication. "
+        "Weights: deeper modules are more concerning; tutorial usage lowers concern."
+    )
     
     if dead_exports:
-        rows = [[it['symbol'], it['type'], it['notebook'], it['module']]
+        rows = [[it['symbol'], it['type'], it['notebook'], it['module'], it['concern_weight'],
+                 'yes' if it['used_in_tutorials'] else 'no']
                 for it in dead_exports[:200]]
         pretty = render_table(
             f'Dead Exports: {len(dead_exports)} unused symbols',
-            ['Symbol', 'Type', 'Notebook', 'Module'],
+            ['Symbol', 'Type', 'Notebook', 'Module', 'Weight', 'Tutorials'],
             rows
         )
         pretty += '\n' + render_panel('lint_dead_exports', note)
@@ -1269,6 +1316,11 @@ def lint_dead_exports(
         'dead_exports': dead_exports,
         'total': len(dead_exports),
         'note': note,
+        'weighting': {
+            'tutorials_dir': str(tuts),
+            'rule': 'concern_weight = module_depth; subtract 1 if used in tutorials'
+        },
         'total_exports': sum(len(syms) for syms in exports_by_module.values()),
         'pretty': pretty
     }
+
