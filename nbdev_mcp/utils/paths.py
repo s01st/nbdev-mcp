@@ -501,7 +501,15 @@ def read_nb(path: Path) -> Dict[str, Any]:
     Dict[str, Any]
         Parsed notebook JSON data.
     """
-    return json.loads(path.read_text(encoding="utf-8"))
+    text = path.read_text(encoding="utf-8")
+    if "\n" not in text:
+        raise ValueError(
+            "Notebook JSON appears minified (single-line). "
+            "Do not write notebooks with json.dumps without indent; "
+            "use nbformat/write_nb and restore the file if needed."
+        )
+    return json.loads(text)
+
 
 # %% ../../nbs/00_utils/08_paths.ipynb 32
 def write_nb(path: Path, data: Dict[str, Any]) -> None:
@@ -514,7 +522,11 @@ def write_nb(path: Path, data: Dict[str, Any]) -> None:
     data : Dict[str, Any]
         Notebook data to write.
     """
-    path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    payload = json.dumps(data, indent=2)
+    if "\n" not in payload:
+        raise ValueError("Refusing to write minified notebook JSON; use indent.")
+    path.write_text(payload + "\n", encoding="utf-8")
+
 
 # %% ../../nbs/00_utils/08_paths.ipynb 34
 def resolve_relative(current: str, rel: str) -> str:

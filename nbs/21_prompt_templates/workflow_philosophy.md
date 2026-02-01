@@ -70,6 +70,7 @@ User: "Fix the bug in {lib}/core.py in the process_data function"
 - Avoid private names (leading underscore) for functions, classes, attributes, or vars; dunder methods like `__init__` are OK.
 - Dead-code reports are signals: weigh by module depth and tutorial usage; tutorial usage implies public API and lowers concern.
 - The `tutorials/` directory is for tutorial notebooks only — do not write artifacts/outputs/cache there (use repo root or `~/Downloads/<repo>/`).
+- Never write notebooks via `json.dumps` without indentation. Use nbformat or `write_nb`; single-line notebook JSON is corruption and should be restored.
 - Keep living docs current: `ROADMAP.md`, `TODOs.md`, `*_PLAN.md`, and agent docs under `.claude/` or `.codex/`.
 - All scripting/CLI logic must live in `nbs/` and be exposed via `settings.ini` (`console_scripts`). Avoid ad-hoc scripts outside nbdev.
 - Repo-level `.md` files can be incorporated into `nbs/index.ipynb` as markdown cells (use `split_markdown_cells` to convert).

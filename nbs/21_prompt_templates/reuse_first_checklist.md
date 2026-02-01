@@ -28,10 +28,12 @@
 
 14. The `tutorials/` directory is for tutorial notebooks only — do not write artifacts/outputs/cache there (use repo root or `~/Downloads/<repo>/`).
 
-15. Keep living docs current: `ROADMAP.md`, `TODOs.md`, `*_PLAN.md`, and agent docs under `.claude/` or `.codex/`.
+15. Never write notebooks via `json.dumps` without indentation. Use nbformat or `write_nb`; single-line notebook JSON is corruption and should be restored.
 
-16. Put all scripting/CLI logic in `nbs/` and expose it via `settings.ini` (`console_scripts`); avoid ad-hoc scripts outside nbdev.
+16. Keep living docs current: `ROADMAP.md`, `TODOs.md`, `*_PLAN.md`, and agent docs under `.claude/` or `.codex/`.
 
-17. Repo-level `.md` files can be added to `nbs/index.ipynb` as markdown cells (use `split_markdown_cells` to convert).
+17. Put all scripting/CLI logic in `nbs/` and expose it via `settings.ini` (`console_scripts`); avoid ad-hoc scripts outside nbdev.
 
-18. Keep export/cleanup cells (e.g., `#| hide\nimport nbdev; nbdev.nbdev_export()`) at the end; place new code cells above them and add a fitting markdown subsection heading.
+18. Repo-level `.md` files can be added to `nbs/index.ipynb` as markdown cells (use `split_markdown_cells` to convert).
+
+19. Keep export/cleanup cells (e.g., `#| hide\nimport nbdev; nbdev.nbdev_export()`) at the end; place new code cells above them and add a fitting markdown subsection heading.
