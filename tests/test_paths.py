@@ -1,5 +1,6 @@
 """Tests for nbdev_mcp.utils.paths module."""
 
+import json
 import pytest
 from pathlib import Path
 
@@ -127,6 +128,27 @@ class TestNotebookIO:
         assert nb_path.exists()
         data = read_nb(nb_path)
         assert data["nbformat"] == 4
+
+    def test_read_nb_rejects_minified(self, tmp_path):
+        """Minified single-line notebook JSON should be rejected."""
+        nb_path = tmp_path / "minified.ipynb"
+        nb_data = {
+            "cells": [],
+            "metadata": {},
+            "nbformat": 4,
+            "nbformat_minor": 5
+        }
+        nb_path.write_text(json.dumps(nb_data, separators=(",", ":")), encoding="utf-8")
+        with pytest.raises(ValueError):
+            read_nb(nb_path)
+
+    def test_write_nb_adds_newline(self, temp_project, sample_notebook_data):
+        """write_nb should write pretty JSON with a trailing newline."""
+        nb_path = temp_project / "nbs" / "test_write_newline.ipynb"
+        write_nb(nb_path, sample_notebook_data)
+        text = nb_path.read_text(encoding="utf-8")
+        assert "\n" in text
+        assert text.endswith("\n")
 
 
 class TestJoinSource:

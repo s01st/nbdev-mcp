@@ -317,6 +317,30 @@ class TestCallTools:
         )
         assert result is not None
 
+    async def test_read_notebook_cell_truncates(self, mcp_with_project, temp_nbdev_project):
+        """read_notebook_cell should truncate large cells."""
+        nb_path = temp_nbdev_project / "nbs" / "01_big.ipynb"
+        big_source = ["#| export\n", "x = '" + ("a" * 5000) + "'\n"]
+        nb_data = {
+            "cells": [
+                {"cell_type": "code", "source": big_source, "metadata": {}, "outputs": [], "execution_count": None}
+            ],
+            "metadata": {
+                "kernelspec": {"display_name": "python3", "language": "python", "name": "python3"}
+            },
+            "nbformat": 4,
+            "nbformat_minor": 5
+        }
+        nb_path.write_text(json.dumps(nb_data, indent=2))
+        result = await mcp_with_project.call_tool(
+            "read_notebook_cell",
+            {"notebook": str(nb_path), "cell_index": 0, "truncate_length": 200}
+        )
+        payload = result[1]["result"] if isinstance(result, tuple) else result
+        assert payload["ok"] is True
+        assert payload["truncated"] is True
+        assert payload["source_length"] > 200
+
     async def test_check_if_generated_tool(self, mcp_with_project, temp_nbdev_project):
         """check_if_generated should check for auto-generated files."""
         py_file = temp_nbdev_project / "mylib" / "__init__.py"
