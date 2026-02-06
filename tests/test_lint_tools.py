@@ -120,7 +120,7 @@ nbs_path = nbs
             "nbformat": 4,
             "nbformat_minor": 5
         }
-        (nbs_dir / 'index.ipynb').write_text(json.dumps(index_nb))
+        (nbs_dir / 'index.ipynb').write_text(json.dumps(index_nb, indent=2))
 
         # Create a module notebook
         module_nb = {
@@ -132,7 +132,7 @@ nbs_path = nbs
             "nbformat": 4,
             "nbformat_minor": 5
         }
-        (nbs_dir / '01_utils.ipynb').write_text(json.dumps(module_nb))
+        (nbs_dir / '01_utils.ipynb').write_text(json.dumps(module_nb, indent=2))
 
         return mock_nbdev_project
 
@@ -156,7 +156,7 @@ nbs_path = nbs
             "nbformat": 4,
             "nbformat_minor": 5
         }
-        (init_dir / '00__init__.ipynb').write_text(json.dumps(init_nb))
+        (init_dir / '00__init__.ipynb').write_text(json.dumps(init_nb, indent=2))
 
         result = validate_inits(project=str(mock_nbdev_project))
         assert result['ok'] is True
@@ -181,7 +181,7 @@ nbs_path = nbs
             "nbformat": 4,
             "nbformat_minor": 5
         }
-        (init_dir / '00__init__.ipynb').write_text(json.dumps(init_nb))
+        (init_dir / '00__init__.ipynb').write_text(json.dumps(init_nb, indent=2))
 
         result = validate_inits(project=str(mock_nbdev_project))
         assert result['ok'] is True
@@ -212,7 +212,7 @@ nbs_path = nbs
             "nbformat": 4,
             "nbformat_minor": 5
         }
-        (nbs_dir / 'index.ipynb').write_text(json.dumps(bad_nb))
+        (nbs_dir / 'index.ipynb').write_text(json.dumps(bad_nb, indent=2))
 
         result = lint_rules(project=str(mock_nbdev_project))
 
