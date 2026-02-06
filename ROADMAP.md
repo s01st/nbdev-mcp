@@ -32,6 +32,21 @@
 - Added `EXPORT_MAIN_PATTERN` and `NUMBERED_NOTEBOOK_PATTERN` to regex catalog
 - All ToolAnnotations complete for 45+ tools
 
+## Current Open Items
+
+1. Add safe read-file resource and document repo-level markdown ingestion (`nbs/10_resources.ipynb`).
+2. Audit transport/stdio behavior for parity with `scripts/mcp.nbdev.py` (`nbs/30_mcp.ipynb`).
+3. Migrate remaining script-only features into nbdev modules; keep `scripts/mcp.nbdev.py` as a thin wrapper.
+
+## Operational Guardrails (Bad Request Mitigation)
+
+The following guardrails remain the guiding policy for large notebooks and tool output:
+
+- Enforce output-size limits and return truncated summaries with a saved output path.
+- Avoid full notebook cell dumps; use targeted slices or patch-based edits.
+- Reject minified single-line notebook JSON and require `nbformat`/`write_nb` for edits.
+- Provide an explicit safe mode for strict output limits.
+
 ## Executive Summary
 
 This document outlines the path to a production-ready, well-documented, maintainable nbdev-mcp codebase. The audit identified critical issues in regex duplication, missing documentation, code organization, and test coverage.

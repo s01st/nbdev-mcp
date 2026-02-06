@@ -15,3 +15,4 @@ New features
 - Expanded guidance for maintaining living docs (e.g., ROADMAP.md, TODOs, *_PLAN.md) and keeping repo-level markdown in sync with index.ipynb.
 - Clear directive that script logic should live in nbs/ and be exposed via settings.ini console scripts.
 - Added tests for notebook safety guards and read_notebook_cell truncation.
+- Consolidated roadmap and operational guardrails into ROADMAP.md; removed standalone update/proposal docs.
