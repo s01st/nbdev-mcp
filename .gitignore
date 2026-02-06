@@ -5,8 +5,6 @@ _proc/
 .codex/
 .vscode/
 .pytest_cache/
-TODOS.md
-ROADMAP.md
 current_state.md
 
 
