@@ -28,7 +28,7 @@
 
 14. The `tutorials/` directory is for tutorial notebooks only — do not write artifacts/outputs/cache there (use repo root or `~/Downloads/<repo>/`).
 
-15. Never write notebooks via `json.dumps` without indentation. Use nbformat or `write_nb`; single-line notebook JSON is corruption and should be restored.
+15. Prefer writing notebooks with indentation (for example `indent=2`) so diffs stay readable; using nbformat or `write_nb` is recommended.
 
 16. Keep living docs current: `ROADMAP.md`, `TODOs.md`, `*_PLAN.md`, and agent docs under `.claude/` or `.codex/`.
 

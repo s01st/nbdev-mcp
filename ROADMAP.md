@@ -18,11 +18,10 @@
 - `nbdev_readme` ⚠️ Known issue with numpydoc parsing (local fastcore)
 
 **Recent Updates (2026-02-06):**
-- Added guards to prevent minified notebook JSON reads/writes.
 - Weighted dead-code analysis by module depth and tutorial usage.
 - Clarified duplicate-analysis guidance (ABC implementations and name variants).
 - Made duplicate-scan timeouts configurable with timing metadata.
-- Added tests for notebook safety guards and read_notebook_cell truncation.
+- Added tests for dead-code weighting and read_notebook_cell truncation.
 
 **Prior Updates (2025-12-22):**
 - Added complete NumPy-style docstrings to config, resources, and paths modules
@@ -44,7 +43,7 @@ The following guardrails remain the guiding policy for large notebooks and tool 
 
 - Enforce output-size limits and return truncated summaries with a saved output path.
 - Avoid full notebook cell dumps; use targeted slices or patch-based edits.
-- Reject minified single-line notebook JSON and require `nbformat`/`write_nb` for edits.
+- Prefer formatted notebook JSON for readable diffs; use `nbformat`/`write_nb` when editing notebook content.
 - Provide an explicit safe mode for strict output limits.
 
 ## Executive Summary

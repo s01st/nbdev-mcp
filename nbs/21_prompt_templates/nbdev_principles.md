@@ -23,7 +23,7 @@
 - Use NumPy-style docstrings (Parameters, Returns, Raises, Examples).
 - Dead-code reports are signals: weigh by module depth and tutorial usage; tutorial usage implies public API and lowers concern.
 - The `tutorials/` directory is for tutorial notebooks only — do not write artifacts/outputs/cache there (use repo root or `~/Downloads/<repo>/`).
-- Never write notebooks via `json.dumps` without indentation. Use nbformat or `write_nb`; single-line notebook JSON is corruption and should be restored.
+- Prefer writing notebooks with indentation (for example `indent=2`) so diffs stay readable; using nbformat or `write_nb` is recommended.
 - Keep living docs current: `ROADMAP.md`, `TODOs.md`, `*_PLAN.md`, and agent docs under `.claude/` or `.codex/`.
 - All scripting/CLI logic must live in `nbs/` and be exposed via `settings.ini` (`console_scripts`); avoid ad-hoc scripts outside nbdev.
 - Repo-level `.md` files can be added to `nbs/index.ipynb` as markdown cells (use `split_markdown_cells` to convert).
