@@ -9,7 +9,12 @@ from typing import Any, Dict, List, Optional
 from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 
-from ..utils.paths import project_summary, resolve_selector
+from ..utils.paths import (
+    project_summary,
+    resolve_selector,
+    nbdev_command_name,
+    nbdev_generation,
+)
 from ..utils.subprocess import run, wrap_with_env
 from ..utils.rich import render_result
 
@@ -22,31 +27,68 @@ def nbdev_prepare(
     extra_args: Optional[List[str]] = None,
     use_env: bool = True
 ) -> Dict[str, Any]:
-    """Run nbdev_prepare (export, test, clean notebooks) for the project.
+    """Run nbdev prepare for the project with version-aware command detection.
+    
+    Uses detected nbdev generation to choose command style:
+    - v2: ``nbdev_prepare``
+    - v3: ``nbdev-prepare``
+    Falls back to the alternate form when the preferred command is missing.
     
     Parameters
     ----------
     project : str, optional
         Project path or alias. Uses current project if not specified.
     extra_args : List[str], optional
-        Additional arguments to pass to nbdev_prepare.
+        Additional arguments to pass to the command.
     use_env : bool
         If True, run in project's conda/mamba environment.
     
     Returns
     -------
     Dict[str, Any]
-        Result with command output and status.
+        Result with command output, chosen command, and detection metadata.
     """
     try:
         p = resolve_selector(project)
     except Exception as e:
         return {'ok': False, 'error': str(e)}
-    
-    cmd = wrap_with_env(['nbdev_prepare'] + (extra_args or []), p, use_env)
-    logs = run(cmd, cwd=p)
-    pretty = render_result('nbdev_prepare', project_summary(p), logs)
-    return {**logs, 'project': str(p), 'pretty': pretty}
+
+    preferred = nbdev_command_name(p, "prepare")
+    alternate = "nbdev-prepare" if preferred == "nbdev_prepare" else "nbdev_prepare"
+    candidates = [preferred]
+    if alternate not in candidates:
+        candidates.append(alternate)
+
+    logs: Dict[str, Any] = {}
+    used_command = preferred
+    for i, command_name in enumerate(candidates):
+        cmd = wrap_with_env([command_name] + (extra_args or []), p, use_env)
+        logs = run(cmd, cwd=p)
+        used_command = command_name
+        if logs.get("ok"):
+            break
+
+        stderr = (logs.get("stderr") or "").lower()
+        stdout = (logs.get("stdout") or "").lower()
+        command_missing = (
+            "not found" in stderr
+            or "no such file or directory" in stderr
+            or "command not found" in stderr
+            or "not recognized as an internal or external command" in stderr
+            or "not found" in stdout
+        )
+        if i == len(candidates) - 1 or not command_missing:
+            break
+
+    pretty = render_result(used_command, project_summary(p), logs)
+    return {
+        **logs,
+        'project': str(p),
+        'nbdev_generation': nbdev_generation(p),
+        'nbdev_command': used_command,
+        'nbdev_command_candidates': candidates,
+        'pretty': pretty,
+    }
 
 # %% ../../nbs/11_tools/03_nbdev.ipynb 7
 def nbdev_export(
@@ -55,7 +97,12 @@ def nbdev_export(
     extra_args: Optional[List[str]] = None,
     use_env: bool = True
 ) -> Dict[str, Any]:
-    """Run nbdev_export on the project.
+    """Run nbdev export for the project with version-aware command detection.
+    
+    Uses detected nbdev generation to choose command style:
+    - v2: ``nbdev_export``
+    - v3: ``nbdev-export``
+    Falls back to the alternate form when the preferred command is missing.
     
     Parameters
     ----------
@@ -64,30 +111,62 @@ def nbdev_export(
     processors : List[str], optional
         Pre/post processors to apply.
     extra_args : List[str], optional
-        Additional arguments to pass to nbdev_export.
+        Additional arguments to pass to the command.
     use_env : bool
         If True, run in project's conda/mamba environment.
     
     Returns
     -------
     Dict[str, Any]
-        Result with command output and status.
+        Result with command output, chosen command, and detection metadata.
     """
     try:
         p = resolve_selector(project)
     except Exception as e:
         return {'ok': False, 'error': str(e)}
-    
-    cmd = ['nbdev_export']
+
+    command_args: List[str] = []
     if processors:
-        cmd += ['--procs'] + processors
+        command_args += ['--procs'] + processors
     if extra_args:
-        cmd += extra_args
-    
-    cmd = wrap_with_env(cmd, p, use_env)
-    logs = run(cmd, cwd=p)
-    pretty = render_result('nbdev_export', project_summary(p), logs)
-    return {**logs, 'project': str(p), 'pretty': pretty}
+        command_args += extra_args
+
+    preferred = nbdev_command_name(p, "export")
+    alternate = "nbdev-export" if preferred == "nbdev_export" else "nbdev_export"
+    candidates = [preferred]
+    if alternate not in candidates:
+        candidates.append(alternate)
+
+    logs: Dict[str, Any] = {}
+    used_command = preferred
+    for i, command_name in enumerate(candidates):
+        cmd = wrap_with_env([command_name] + command_args, p, use_env)
+        logs = run(cmd, cwd=p)
+        used_command = command_name
+        if logs.get("ok"):
+            break
+
+        stderr = (logs.get("stderr") or "").lower()
+        stdout = (logs.get("stdout") or "").lower()
+        command_missing = (
+            "not found" in stderr
+            or "no such file or directory" in stderr
+            or "command not found" in stderr
+            or "not recognized as an internal or external command" in stderr
+            or "not found" in stdout
+        )
+        if i == len(candidates) - 1 or not command_missing:
+            break
+
+    pretty = render_result(used_command, project_summary(p), logs)
+    return {
+        **logs,
+        'project': str(p),
+        'nbdev_generation': nbdev_generation(p),
+        'nbdev_command': used_command,
+        'nbdev_command_candidates': candidates,
+        'pretty': pretty,
+    }
 
 # %% ../../nbs/11_tools/03_nbdev.ipynb 8
 def nbdev_test(
@@ -99,7 +178,12 @@ def nbdev_test(
     file_re: Optional[str] = None,
     use_env: bool = True
 ) -> Dict[str, Any]:
-    """Run nbdev_test for the project.
+    """Run nbdev test for the project with version-aware command detection.
+    
+    Uses detected nbdev generation to choose command style:
+    - v2: ``nbdev_test``
+    - v3: ``nbdev-test``
+    Falls back to the alternate form when the preferred command is missing.
     
     Parameters
     ----------
@@ -121,29 +205,61 @@ def nbdev_test(
     Returns
     -------
     Dict[str, Any]
-        Result with command output and status.
+        Result with command output, chosen command, and detection metadata.
     """
     try:
         p = resolve_selector(project)
     except Exception as e:
         return {'ok': False, 'error': str(e)}
-    
-    cmd = ['nbdev_test']
+
+    command_args: List[str] = []
     if path:
-        cmd += ['--path', path]
+        command_args += ['--path', path]
     if flags:
-        cmd += ['--flags', flags]
+        command_args += ['--flags', flags]
     if n_workers is not None:
-        cmd += ['--n_workers', str(n_workers)]
+        command_args += ['--n_workers', str(n_workers)]
     if do_print:
-        cmd += ['--do_print']
+        command_args += ['--do_print']
     if file_re:
-        cmd += ['--file_re', file_re]
-    
-    cmd = wrap_with_env(cmd, p, use_env)
-    logs = run(cmd, cwd=p)
-    pretty = render_result('nbdev_test', project_summary(p), logs)
-    return {**logs, 'project': str(p), 'pretty': pretty}
+        command_args += ['--file_re', file_re]
+
+    preferred = nbdev_command_name(p, "test")
+    alternate = "nbdev-test" if preferred == "nbdev_test" else "nbdev_test"
+    candidates = [preferred]
+    if alternate not in candidates:
+        candidates.append(alternate)
+
+    logs: Dict[str, Any] = {}
+    used_command = preferred
+    for i, command_name in enumerate(candidates):
+        cmd = wrap_with_env([command_name] + command_args, p, use_env)
+        logs = run(cmd, cwd=p)
+        used_command = command_name
+        if logs.get("ok"):
+            break
+
+        stderr = (logs.get("stderr") or "").lower()
+        stdout = (logs.get("stdout") or "").lower()
+        command_missing = (
+            "not found" in stderr
+            or "no such file or directory" in stderr
+            or "command not found" in stderr
+            or "not recognized as an internal or external command" in stderr
+            or "not found" in stdout
+        )
+        if i == len(candidates) - 1 or not command_missing:
+            break
+
+    pretty = render_result(used_command, project_summary(p), logs)
+    return {
+        **logs,
+        'project': str(p),
+        'nbdev_generation': nbdev_generation(p),
+        'nbdev_command': used_command,
+        'nbdev_command_candidates': candidates,
+        'pretty': pretty,
+    }
 
 # %% ../../nbs/11_tools/03_nbdev.ipynb 9
 def pytest_run(

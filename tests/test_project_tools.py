@@ -160,6 +160,20 @@ nbs_path = nbs
         nb.write_text('{"cells": [], "metadata": {}, "nbformat": 4, "nbformat_minor": 5}')
         return tmp_path
 
+    @pytest.fixture
+    def mock_nbdev_project_toml(self, tmp_path):
+        """Create a minimal TOML-based nbdev project structure."""
+        (tmp_path / 'settings.toml').write_text(
+            'lib_name = "testlibtoml"\n'
+            'nbs_path = "nbs"\n'
+            'console_scripts = ["mycli=testlibtoml:main"]\n'
+        )
+        nbs_dir = tmp_path / 'nbs'
+        nbs_dir.mkdir()
+        nb = nbs_dir / 'index.ipynb'
+        nb.write_text('{"cells": [], "metadata": {}, "nbformat": 4, "nbformat_minor": 5}')
+        return tmp_path
+
     def test_set_project_returns_summary(self, mock_nbdev_project):
         """set_project returns project summary on success."""
         result = set_project(str(mock_nbdev_project))
@@ -172,6 +186,14 @@ nbs_path = nbs
         result = console_scripts_status(project=str(mock_nbdev_project))
         assert result['ok'] is True
         assert result['entries'] == []
+
+    def test_console_scripts_status_with_toml_path(self, mock_nbdev_project_toml):
+        """console_scripts_status reads TOML-based config."""
+        result = console_scripts_status(project=str(mock_nbdev_project_toml))
+        assert result['ok'] is True
+        assert result['settings_file'] == 'settings.toml'
+        assert result['nbdev_generation'] == 'v3'
+        assert 'mycli=testlibtoml:main' in result['entries']
 
 
 class TestConfigStatus:

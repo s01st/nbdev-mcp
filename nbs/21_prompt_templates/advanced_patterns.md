@@ -9,7 +9,7 @@
 - Subpackage init: `nbs/<pkg>/00__init__.ipynb` → `#| default_exp <pkg>.__init__`
 - Submodules: use dotted `default_exp` (e.g., `core.data`) to create directories.
 - `nbs/index.ipynb` becomes README.md and does not need `default_exp`.
-- Scripting/CLI logic belongs in `nbs/` and should be exposed via `settings.ini` (`console_scripts`).
+- Scripting/CLI logic belongs in `nbs/` and should be exposed via `{nbdev_settings_file}` (`console_scripts`).
 - Repo-level `.md` files can be incorporated into `nbs/index.ipynb` as markdown cells (use `split_markdown_cells`).
 
 ## Imports

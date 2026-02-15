@@ -64,7 +64,7 @@ refactor(nb): extract common parsing logic
 ## Commit Hygiene
 
 - **Atomic commits**: One logical change per commit
-- **Run `nbdev_prepare` before committing**: Ensures exports are clean
+- **Run `{nbdev_prepare_cmd}` before committing**: Ensures exports are clean
 - **Never commit generated `.py` files alone**: Always commit notebook source
 - **Verify clean notebooks**: Run `nbdev_clean` if needed
 
@@ -83,8 +83,8 @@ Keep commits clean and human-readable. The git history should reflect the projec
 
 ## Pre-Commit Checklist
 
-1. `nbdev_export` - regenerate Python modules
-2. `nbdev_test` - run notebook tests
+1. `{nbdev_export_cmd}` - regenerate Python modules
+2. `{nbdev_test_cmd}` - run notebook tests
 3. `nbdev_clean` - clean notebook metadata
 4. Review `git diff` - verify only intended changes
 5. Remove any AI attribution from commit message
@@ -125,7 +125,7 @@ v1.2.0-rc.1      # Release candidate
 **Tag on main only** - never tag dev or feature branches.
 
 **Update version in code:**
-- `settings.ini`: `version = 1.2.0`
+- `{nbdev_settings_file}`: set project/package version there (format depends on the file type)
 - Commit version bump before tagging
 
 ## .gitignore Essentials

@@ -23,7 +23,7 @@
 - **Cell granularity**: keep __one__ function/class per code cell; split markdown by headings (use the `split_markdown_cells` tool when converting large markdown blobs).
 
 - **Living docs**: keep `ROADMAP.md`, `TODOs.md`, `*_PLAN.md`, and agent docs under `.claude/` or `.codex/` current.
-- **Scripting/CLI**: put all scripting logic in `nbs/` and expose it via `settings.ini` (`console_scripts`), not ad-hoc scripts.
+- **Scripting/CLI**: put all scripting logic in `nbs/` and expose it via `{nbdev_settings_file}` (`console_scripts`), not ad-hoc scripts.
 - **Repo .mds**: you can add repo-level `.md` files to `nbs/index.ipynb` as markdown cells (use `split_markdown_cells`).
 
 - **Live reload**: Use autoreload in notebooks for iterative development:

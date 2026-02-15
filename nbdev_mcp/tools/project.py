@@ -8,16 +8,21 @@ from typing import Any, Dict, List, Optional
 
 import os
 from pathlib import Path
-from configparser import ConfigParser
 
 from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 
 from ..utils.config import load_bookmarks, save_bookmarks
 from nbdev_mcp.utils.paths import (
-    expand, project_summary, is_nbdev_project, resolve_selector,
+    expand,
+    project_summary,
+    is_nbdev_project,
+    resolve_selector,
+    require_project,
+    settings_dict,
+    nbdev_settings_path,
+    nbdev_generation,
 )
-from ..utils.paths import require_project
 from ..utils.rich import render_result, render_table
 
 # %% auto 0
@@ -65,7 +70,7 @@ def current_project() -> Dict[str, Any]:
 
 # %% ../../nbs/11_tools/01_project.ipynb 8
 def console_scripts_status(project: Optional[str] = None) -> Dict[str, Any]:
-    """Tool: Show console_scripts entry points from settings.ini and suggest how to add them.
+    """Tool: Show console_scripts entry points and where to configure them.
     
     Args:
         project: Project path or alias. Uses current project if not specified.
@@ -78,17 +83,31 @@ def console_scripts_status(project: Optional[str] = None) -> Dict[str, Any]:
     except Exception as e:
         return {'ok': False, 'error': str(e)}
     
-    cfg = ConfigParser()
-    cfg.read(p / 'settings.ini')
-    cs = (cfg['DEFAULT'].get('console_scripts', '') if 'DEFAULT' in cfg else '').strip()
-    entries = [e for e in cs.split() if e] if cs else []
-    
-    msg = (
-        'No console_scripts configured. Add e.g. `console_scripts = mycli=mypkg:main` in settings.ini.'
-        if not entries else 'console_scripts present.'
-    )
-    pretty = render_result('console_scripts', {'entries': entries or 'None'}, {})
-    return {'ok': True, 'entries': entries, 'message': msg, 'pretty': pretty}
+    settings = settings_dict(p)
+    settings_file = nbdev_settings_path(p)
+    settings_name = settings_file.name if settings_file is not None else 'settings.ini'
+
+    cs = settings.get('console_scripts', '').strip()
+    entries = [entry for entry in cs.split() if entry] if cs else []
+
+    if entries:
+        msg = f'console_scripts present in {settings_name}.'
+    else:
+        if settings_name.endswith('.toml'):
+            example = 'console_scripts = ["mycli=mypkg:main"]'
+        else:
+            example = 'console_scripts = mycli=mypkg:main'
+        msg = f'No console_scripts configured. Add e.g. `{example}` in {settings_name}.'
+
+    pretty = render_result('console_scripts', {'entries': entries or 'None', 'settings_file': settings_name}, {})
+    return {
+        'ok': True,
+        'entries': entries,
+        'settings_file': settings_name,
+        'nbdev_generation': nbdev_generation(p),
+        'message': msg,
+        'pretty': pretty,
+    }
 
 # %% ../../nbs/11_tools/01_project.ipynb 10
 def find_projects(
@@ -512,21 +531,17 @@ def analyze_remote(
             }
         
         # Check if it's an nbdev project
-        settings_ini = clone_path / 'settings.ini'
-        if not settings_ini.exists():
+        if not is_nbdev_project(clone_path):
             return {
                 'ok': False,
-                'error': 'Not an nbdev project (no settings.ini found)',
+                'error': 'Not an nbdev project (expected nbs/ plus settings.ini/settings.toml/pyproject.toml [tool.nbdev])',
                 'url': url
             }
-        
-        # Parse settings.ini
-        from configparser import ConfigParser
-        config = ConfigParser()
-        config.read(settings_ini)
-        
-        settings = dict(config['DEFAULT']) if 'DEFAULT' in config else {}
-        
+
+        settings = settings_dict(clone_path)
+        settings_file = nbdev_settings_path(clone_path)
+        generation = nbdev_generation(clone_path)
+
         # Find notebooks
         nbs_path = settings.get('nbs_path', 'nbs')
         nbs_dir = clone_path / nbs_path
@@ -541,7 +556,7 @@ def analyze_remote(
         
         # Find lib path
         lib_path = settings.get('lib_path', settings.get('lib_name', ''))
-        lib_dir = clone_path / lib_path
+        lib_dir = clone_path / lib_path if lib_path else clone_path
         
         modules = []
         if lib_dir.exists():
@@ -551,6 +566,8 @@ def analyze_remote(
                 if not m.name.startswith('.')
             ])
         
+        requirements_raw = settings.get('requirements', '')
+
         # Build analysis
         analysis = {
             'ok': True,
@@ -560,7 +577,9 @@ def analyze_remote(
             'version': settings.get('version', 'unknown'),
             'description': settings.get('description', ''),
             'author': settings.get('author', ''),
-            'requirements': settings.get('requirements', '').split(),
+            'requirements': requirements_raw.split() if requirements_raw else [],
+            'nbdev_generation': generation,
+            'nbdev_settings_file': settings_file.name if settings_file is not None else None,
             'notebooks': {
                 'count': len(notebooks),
                 'paths': notebooks[:50],  # Limit to 50
@@ -576,6 +595,8 @@ def analyze_remote(
         pretty = render_result(f'Remote Analysis: {repo_name}', {
             'name': analysis['name'],
             'version': analysis['version'],
+            'nbdev_generation': analysis['nbdev_generation'],
+            'settings_file': analysis['nbdev_settings_file'] or 'N/A',
             'notebooks': analysis['notebooks']['count'],
             'modules': analysis['modules']['count'],
             'description': analysis['description'][:100] if analysis['description'] else 'N/A'

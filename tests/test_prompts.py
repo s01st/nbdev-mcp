@@ -229,6 +229,11 @@ class TestPromptContext:
         assert isinstance(ctx, dict)
         assert "lib" in ctx
         assert "nbs_path" in ctx
+        assert "nbdev_generation" in ctx
+        assert "nbdev_settings_file" in ctx
+        assert "nbdev_prepare_cmd" in ctx
+        assert "nbdev_export_cmd" in ctx
+        assert "nbdev_test_cmd" in ctx
 
     def test_prompt_context_with_project(self, temp_project):
         """prompt_context extracts lib name from active project."""
@@ -258,6 +263,9 @@ class TestPromptContext:
             ctx = prompt_context()
             assert ctx["lib"] == "<lib_name>"
             assert ctx["nbs_path"] == "nbs"
+            assert ctx["nbdev_generation"] == "v2"
+            assert ctx["nbdev_settings_file"] == "settings.ini"
+            assert ctx["nbdev_export_cmd"] == "nbdev_export"
         finally:
             nbdev_mcp.utils.config.CURRENT_PROJECT = old
 

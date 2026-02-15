@@ -11,7 +11,15 @@ from mcp.server.fastmcp import FastMCP  # official MCP Python SDK (FastMCP 2.0+)
 from mcp.server.fastmcp.resources import FunctionResource
 
 from .utils.config import load_bookmarks
-from .utils.paths import require_project, project_summary, nbs_dir, settings_dict, env_file
+from .utils.paths import (
+    require_project,
+    project_summary,
+    nbs_dir,
+    settings_dict,
+    env_file,
+    nbdev_settings_path,
+    nbdev_generation,
+)
 
 # %% auto 0
 __all__ = ['resource_project_summary', 'resource_projects', 'resource_tree', 'resource_settings', 'resource_env_file',
@@ -51,8 +59,7 @@ def resource_tree() -> str:
     Returns
     -------
     str
-        JSON string with 'root', 'nbs_dir', 'notebooks' list (max 600),
-        'has_settings_ini', and 'has_readme' flags.
+        JSON string with project tree information and nbdev config metadata.
     """
     p = require_project()
     nbs = nbs_dir(p)
@@ -63,22 +70,35 @@ def resource_tree() -> str:
                 files.append(str(q.relative_to(p)))
             except Exception:
                 files.append(str(q))
-    payload = {'root': str(p), 'nbs_dir': str(nbs), 'notebooks': files[:600], 'has_settings_ini': (p / 'settings.ini').exists(), 'has_readme': (p / 'README.md').exists()}
+    settings_file = nbdev_settings_path(p)
+    payload = {
+        'root': str(p),
+        'nbs_dir': str(nbs),
+        'notebooks': files[:600],
+        'has_settings_ini': (p / 'settings.ini').exists(),
+        'has_settings_toml': (p / 'settings.toml').exists(),
+        'settings_file': settings_file.name if settings_file is not None else None,
+        'nbdev_generation': nbdev_generation(p),
+        'has_readme': (p / 'README.md').exists(),
+    }
     return json.dumps(payload, indent=2)
 
 
 # %% ../nbs/10_resources.ipynb 9
 def resource_settings() -> str:
-    """Resource: contents of the current project's settings.ini file.
+    """Resource: contents of the current project's nbdev settings file.
     
     Returns
     -------
     str
-        The settings.ini file contents, or an error message if not found.
+        Contents of detected settings file (settings.ini/settings.toml/pyproject.toml),
+        or an error message if not found.
     """
     p = require_project()
-    f = p / 'settings.ini'
-    return f.read_text(encoding='utf-8') if f.exists() else 'No settings.ini found.'
+    settings_file = nbdev_settings_path(p)
+    if settings_file is None:
+        return 'No nbdev settings file found (expected settings.ini, settings.toml, or pyproject.toml with [tool.nbdev]).'
+    return settings_file.read_text(encoding='utf-8')
 
 
 # %% ../nbs/10_resources.ipynb 10
@@ -306,7 +326,7 @@ def add_resources(mcp: FastMCP) -> None:
     ))
     mcp.add_resource(FunctionResource(
         uri="nbdev://settings", name="settings",
-        description="Contents of settings.ini",
+        description="Contents of detected nbdev settings file",
         fn=resource_settings
     ))
     mcp.add_resource(FunctionResource(
@@ -337,4 +357,3 @@ def add_resources(mcp: FastMCP) -> None:
 
 # %% ../nbs/10_resources.ipynb 19
 #| export
-

@@ -11,6 +11,7 @@ import os
 import re
 import json
 import time
+import tomllib
 import platform
 from pathlib import Path
 from configparser import ConfigParser
@@ -31,8 +32,9 @@ from nbdev_mcp.utils.re import (
 )
 
 # %% auto 0
-__all__ = ['notebook_cache', 'NOTEBOOK_CACHE_TTL', 'expand', 'settings_dict', 'lib_name', 'nbs_dir', 'tutorials_dir',
-           'safe_relative_to', 'is_nbdev_project', 'env_file', 'discover_env_name', 'find_project_root',
+__all__ = ['notebook_cache', 'NOTEBOOK_CACHE_TTL', 'expand', 'settings_dict', 'nbdev_settings_path',
+           'nbdev_generation', 'nbdev_command_name', 'lib_name', 'nbs_dir', 'tutorials_dir', 'safe_relative_to',
+           'is_nbdev_project', 'env_file', 'discover_env_name', 'find_project_root',
            'require_project', 'resolve_selector', 'clear_notebook_cache', 'iter_notebooks_uncached', 'iter_notebooks',
            'project_summary', 'read_nb', 'write_nb', 'resolve_relative', 'abs_module_for_nb', 'py_to_notebook',
            'modidx_path', 'clear_modidx_cache', 'load_modidx', 'symbol_locations', 'with_project',
@@ -64,7 +66,12 @@ def expand(p: str) -> Path:
 
 # %% ../../nbs/00_utils/08_paths.ipynb 8
 def settings_dict(project: Path) -> Dict[str, str]:
-    """Read nbdev settings.ini from the project and return key settings.
+    """Read nbdev settings from .ini/.toml config files.
+    
+    Detection order:
+    1. ``settings.toml``
+    2. ``pyproject.toml`` under ``[tool.nbdev]``
+    3. ``settings.ini``
     
     Parameters
     ----------
@@ -74,30 +81,174 @@ def settings_dict(project: Path) -> Dict[str, str]:
     Returns
     -------
     Dict[str, str]
-        Dictionary with keys: lib_name, nbs_path, doc_path, branch, repo, user, black_formatting.
-        Missing keys have empty string values.
+        Dictionary with normalized string values. Missing keys are empty strings.
     """
+    fields = [
+        "lib_name",
+        "lib_path",
+        "nbs_path",
+        "doc_path",
+        "branch",
+        "repo",
+        "user",
+        "black_formatting",
+        "console_scripts",
+        "version",
+        "description",
+        "author",
+        "requirements",
+        "dev_requirements",
+        "nbdev_version",
+    ]
+
+    settings_toml = project / "settings.toml"
+    pyproject_toml = project / "pyproject.toml"
+
+    toml_candidates: List[Dict[str, Any]] = []
+    for toml_path in [settings_toml, pyproject_toml]:
+        if not toml_path.exists():
+            continue
+        try:
+            toml_data = tomllib.loads(toml_path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+
+        if isinstance(toml_data, dict):
+            tool = toml_data.get("tool")
+            if isinstance(tool, dict):
+                nbdev_cfg = tool.get("nbdev")
+                if isinstance(nbdev_cfg, dict):
+                    toml_candidates.append(nbdev_cfg)
+
+            nbdev_top = toml_data.get("nbdev")
+            if isinstance(nbdev_top, dict):
+                toml_candidates.append(nbdev_top)
+
+            toml_candidates.append(toml_data)
+
+    for candidate in toml_candidates:
+        if not any(key in candidate for key in fields):
+            continue
+        parsed: Dict[str, str] = {}
+        for key in fields:
+            value = candidate.get(key, "")
+            if isinstance(value, list):
+                parsed[key] = " ".join(str(item).strip() for item in value if str(item).strip())
+            elif value is None:
+                parsed[key] = ""
+            else:
+                parsed[key] = str(value).strip()
+        return parsed
+
     cfg = ConfigParser()
-    f = project / "settings.ini"
-    if not f.exists():
+    settings_ini = project / "settings.ini"
+    if not settings_ini.exists():
         return {}
-    
-    cfg.read(f)
-    d = dict(cfg["DEFAULT"]) if "DEFAULT" in cfg else {}
-    
-    return {
-        "lib_name": d.get("lib_name", "").strip(),
-        "nbs_path": d.get("nbs_path", "").strip(),
-        "doc_path": d.get("doc_path", "").strip(),
-        "branch": d.get("branch", "").strip(),
-        "repo": d.get("repo", "").strip(),
-        "user": d.get("user", "").strip(),
-        "black_formatting": d.get("black_formatting", "").strip(),
-    }
+
+    cfg.read(settings_ini)
+    data = dict(cfg["DEFAULT"]) if "DEFAULT" in cfg else {}
+
+    parsed_ini: Dict[str, str] = {}
+    for key in fields:
+        parsed_ini[key] = data.get(key, "").strip()
+    return parsed_ini
 
 # %% ../../nbs/00_utils/08_paths.ipynb 9
+def nbdev_settings_path(project: Path) -> Optional[Path]:
+    """Return the active nbdev settings file for a project.
+    
+    Preference order:
+    1. ``settings.toml``
+    2. ``pyproject.toml`` with ``[tool.nbdev]``
+    3. ``settings.ini``
+    """
+    settings_toml = project / "settings.toml"
+    if settings_toml.exists():
+        return settings_toml
+
+    pyproject_toml = project / "pyproject.toml"
+    if pyproject_toml.exists():
+        try:
+            pyproject_data = tomllib.loads(pyproject_toml.read_text(encoding="utf-8"))
+            tool = pyproject_data.get("tool") if isinstance(pyproject_data, dict) else None
+            if isinstance(tool, dict) and isinstance(tool.get("nbdev"), dict):
+                return pyproject_toml
+        except Exception:
+            pass
+
+    settings_ini = project / "settings.ini"
+    if settings_ini.exists():
+        return settings_ini
+
+    return None
+
+# %% ../../nbs/00_utils/08_paths.ipynb 10
+def nbdev_generation(project: Path) -> str:
+    """Detect nbdev generation for a project (v2/v3/unknown)."""
+    settings_file = nbdev_settings_path(project)
+    if settings_file is None:
+        return "unknown"
+
+    if settings_file.name == "settings.ini":
+        return "v2"
+
+    settings = settings_dict(project)
+    nbdev_version = settings.get("nbdev_version", "")
+    if nbdev_version:
+        major_digits = ""
+        for ch in nbdev_version.strip():
+            if ch.isdigit():
+                major_digits += ch
+            elif major_digits:
+                break
+        if major_digits:
+            try:
+                return "v3" if int(major_digits) >= 3 else "v2"
+            except ValueError:
+                pass
+
+    if settings_file.suffix == ".toml":
+        return "v3"
+
+    return "unknown"
+
+# %% ../../nbs/00_utils/08_paths.ipynb 11
+def nbdev_command_name(project: Path, command: str) -> str:
+    """Return the nbdev CLI command name for the detected project generation.
+    
+    Parameters
+    ----------
+    project : Path
+        Path to the nbdev project root.
+    command : str
+        Command key or command name.
+        Accepted keys: ``prepare``, ``export``, ``test``, ``readme``.
+    """
+    normalized = command.strip()
+    if normalized.startswith("nbdev_"):
+        normalized = normalized[6:]
+    elif normalized.startswith("nbdev-"):
+        normalized = normalized[6:]
+
+    command_table = {
+        "prepare": ("nbdev_prepare", "nbdev-prepare"),
+        "export": ("nbdev_export", "nbdev-export"),
+        "test": ("nbdev_test", "nbdev-test"),
+        "readme": ("nbdev_readme", "nbdev-readme"),
+    }
+
+    names = command_table.get(normalized)
+    if names is None:
+        return command
+
+    generation = nbdev_generation(project)
+    if generation == "v3":
+        return names[1]
+    return names[0]
+
+# %% ../../nbs/00_utils/08_paths.ipynb 12
 def lib_name(project: Path) -> str:
-    """Get library name from settings, or 'pkg' as fallback.
+    """Get library name from nbdev settings, or 'pkg' as fallback.
     
     Parameters
     ----------
@@ -107,7 +258,7 @@ def lib_name(project: Path) -> str:
     Returns
     -------
     str
-        Library name from settings.ini or 'pkg' if not found.
+        Library name from nbdev config or 'pkg' if not found.
     """
     return settings_dict(project).get('lib_name') or 'pkg'
 
@@ -192,9 +343,10 @@ def is_nbdev_project(p: Path) -> bool:
     Returns
     -------
     bool
-        True if path has settings.ini and nbs directory.
+        True if path has a recognized nbdev settings file and nbs directory.
     """
-    return (p / "settings.ini").is_file() and nbs_dir(p).exists()
+    settings_file = nbdev_settings_path(p)
+    return (settings_file is not None) and nbs_dir(p).exists()
 
 # %% ../../nbs/00_utils/08_paths.ipynb 16
 def env_file(
@@ -223,7 +375,7 @@ def env_file(
     envs_dir : Path or None
         Custom directory to search first for environment files.
     lib_name_override : str or None
-        Library name for scoped files. Defaults to lib_name from settings.ini.
+        Library name for scoped files. Defaults to lib_name from nbdev settings.
     
     Returns
     -------
@@ -376,7 +528,9 @@ def resolve_selector(selector: Optional[str]) -> Path:
     root = find_project_root(p) or p
     if is_nbdev_project(root):
         return root
-    raise RuntimeError(f"Not an nbdev project (requires settings.ini and nbs/ folder): {p}")
+    raise RuntimeError(
+        f"Not an nbdev project (requires nbs/ and nbdev settings file: settings.ini/settings.toml/pyproject.toml): {p}"
+    )
 
 # %% ../../nbs/00_utils/08_paths.ipynb 24
 # Cache for notebook listings with time-based invalidation
@@ -474,10 +628,11 @@ def project_summary(project: Path) -> Dict[str, Any]:
     -------
     Dict[str, Any]
         Dictionary with project info: project path, lib_name, nbs_dir,
-        has_index_ipynb, has_readme, env_file.
+        has_index_ipynb, has_readme, env_file, settings file, and generation.
     """
     s = settings_dict(project)
     ef = env_file(project)
+    settings_file = nbdev_settings_path(project)
     return {
         "project": str(project),
         "lib_name": s.get("lib_name"),
@@ -485,6 +640,8 @@ def project_summary(project: Path) -> Dict[str, Any]:
         "has_index_ipynb": (nbs_dir(project) / "index.ipynb").exists(),
         "has_readme": (project / "README.md").exists(),
         "env_file": str(ef) if ef.exists() else None,
+        "nbdev_settings_file": settings_file.name if settings_file is not None else None,
+        "nbdev_generation": nbdev_generation(project),
     }
 
 # %% ../../nbs/00_utils/08_paths.ipynb 31

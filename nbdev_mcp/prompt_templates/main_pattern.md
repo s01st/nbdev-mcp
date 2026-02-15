@@ -25,5 +25,5 @@ if __name__ == "__main__":
 ```
 
 ## Console scripts
-- Add to settings.ini: `console_scripts = mycli=mypkg:main`
-- After `nbdev_export`, setuptools exposes `mycli` as an entry point.
+- Add to `{nbdev_settings_file}`: `console_scripts = mycli=mypkg:main` (or TOML equivalent list format).
+- After `{nbdev_export_cmd}`, setuptools exposes `mycli` as an entry point.

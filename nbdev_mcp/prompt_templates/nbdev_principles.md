@@ -25,7 +25,7 @@
 - The `tutorials/` directory is for tutorial notebooks only — do not write artifacts/outputs/cache there (use repo root or `~/Downloads/<repo>/`).
 - Prefer writing notebooks with indentation (for example `indent=2`) so diffs stay readable; using nbformat or `write_nb` is recommended.
 - Keep living docs current: `ROADMAP.md`, `TODOs.md`, `*_PLAN.md`, and agent docs under `.claude/` or `.codex/`.
-- All scripting/CLI logic must live in `nbs/` and be exposed via `settings.ini` (`console_scripts`); avoid ad-hoc scripts outside nbdev.
+- All scripting/CLI logic must live in `nbs/` and be exposed via `{nbdev_settings_file}` (`console_scripts`); avoid ad-hoc scripts outside nbdev.
 - Repo-level `.md` files can be added to `nbs/index.ipynb` as markdown cells (use `split_markdown_cells` to convert).
 
 ## State Management for MCP Tools

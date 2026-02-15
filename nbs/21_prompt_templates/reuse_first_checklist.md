@@ -18,7 +18,7 @@
 
 9. When a block is 5–10 lines of control flow, extract a small utility and call it; keep top-level functions small.
 
-10. After edits, run `nbdev_export` and appropriate tests (`pytest` or `nbdev_test`).
+10. After edits, run `{nbdev_export_cmd}` and appropriate tests (`pytest` or `{nbdev_test_cmd}`).
 
 11. Review `{lib}/_modidx.py` (or run `modidx_audit` / `dependency_snapshot`) to confirm exports are unique, non-private, and notebooks are numbered.
 
@@ -32,7 +32,7 @@
 
 16. Keep living docs current: `ROADMAP.md`, `TODOs.md`, `*_PLAN.md`, and agent docs under `.claude/` or `.codex/`.
 
-17. Put all scripting/CLI logic in `nbs/` and expose it via `settings.ini` (`console_scripts`); avoid ad-hoc scripts outside nbdev.
+17. Put all scripting/CLI logic in `nbs/` and expose it via `{nbdev_settings_file}` (`console_scripts`); avoid ad-hoc scripts outside nbdev.
 
 18. Repo-level `.md` files can be added to `nbs/index.ipynb` as markdown cells (use `split_markdown_cells` to convert).
 

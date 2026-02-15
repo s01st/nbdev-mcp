@@ -6,6 +6,9 @@ from pathlib import Path
 from nbdev_mcp.utils.paths import (
     expand,
     settings_dict,
+    nbdev_settings_path,
+    nbdev_generation,
+    nbdev_command_name,
     lib_name,
     nbs_dir,
     tutorials_dir,
@@ -37,7 +40,7 @@ class TestExpand:
 
 
 class TestSettingsDict:
-    """Test settings.ini parsing."""
+    """Test nbdev settings parsing."""
 
     def test_settings_dict_returns_dict(self, temp_project):
         """Test settings_dict returns a dict."""
@@ -46,9 +49,66 @@ class TestSettingsDict:
         assert "lib_name" in result
 
     def test_settings_dict_missing_file(self, tmp_path):
-        """Test settings_dict with no settings.ini."""
+        """Test settings_dict with no recognized settings file."""
         result = settings_dict(tmp_path)
         assert result == {}
+
+    def test_settings_dict_from_settings_toml(self, tmp_path):
+        """settings_dict parses settings.toml."""
+        (tmp_path / "nbs").mkdir()
+        (tmp_path / "settings.toml").write_text(
+            """lib_name = "tomllib"
+nbs_path = "nbs"
+console_scripts = ["tcli=tomllib:main"]
+""",
+            encoding="utf-8",
+        )
+        result = settings_dict(tmp_path)
+        assert result["lib_name"] == "tomllib"
+        assert result["nbs_path"] == "nbs"
+        assert "tcli=tomllib:main" in result["console_scripts"]
+
+    def test_settings_dict_from_pyproject_tool_nbdev(self, tmp_path):
+        """settings_dict parses [tool.nbdev] from pyproject.toml."""
+        (tmp_path / "nbs").mkdir()
+        (tmp_path / "pyproject.toml").write_text(
+            """[tool.nbdev]
+lib_name = "pyprojlib"
+nbs_path = "nbs"
+nbdev_version = "3.0.0"
+""",
+            encoding="utf-8",
+        )
+        result = settings_dict(tmp_path)
+        assert result["lib_name"] == "pyprojlib"
+        assert result["nbdev_version"] == "3.0.0"
+
+    def test_nbdev_settings_path_prefers_toml(self, tmp_path):
+        """settings.toml should win over settings.ini when both exist."""
+        (tmp_path / "nbs").mkdir()
+        (tmp_path / "settings.ini").write_text("[DEFAULT]\nlib_name = inil\n", encoding="utf-8")
+        (tmp_path / "settings.toml").write_text('lib_name = "tomll"\n', encoding="utf-8")
+        settings_path = nbdev_settings_path(tmp_path)
+        assert settings_path is not None
+        assert settings_path.name == "settings.toml"
+
+    def test_nbdev_generation_detection(self, temp_project, tmp_path):
+        """Detect v2 from ini and v3 from toml."""
+        assert nbdev_generation(temp_project) == "v2"
+        toml_project = tmp_path / "toml_project"
+        toml_project.mkdir()
+        (toml_project / "nbs").mkdir()
+        (toml_project / "settings.toml").write_text('lib_name = "x"\n', encoding="utf-8")
+        assert nbdev_generation(toml_project) == "v3"
+
+    def test_nbdev_command_name_by_generation(self, temp_project, tmp_path):
+        """nbdev command names map by project generation."""
+        assert nbdev_command_name(temp_project, "export") == "nbdev_export"
+        toml_project = tmp_path / "toml_project"
+        toml_project.mkdir()
+        (toml_project / "nbs").mkdir()
+        (toml_project / "settings.toml").write_text('lib_name = "x"\n', encoding="utf-8")
+        assert nbdev_command_name(toml_project, "export") == "nbdev-export"
 
 
 class TestLibName:
@@ -85,6 +145,12 @@ class TestProjectDirs:
     def test_is_nbdev_project_false(self, tmp_path):
         """Test is_nbdev_project with non-project."""
         assert not is_nbdev_project(tmp_path)
+
+    def test_is_nbdev_project_toml(self, tmp_path):
+        """is_nbdev_project should accept TOML-based nbdev config."""
+        (tmp_path / "nbs").mkdir()
+        (tmp_path / "settings.toml").write_text('lib_name = "x"\n', encoding="utf-8")
+        assert is_nbdev_project(tmp_path)
 
 
 class TestIterNotebooks:

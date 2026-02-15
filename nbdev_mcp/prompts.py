@@ -13,7 +13,12 @@ from mcp.server.fastmcp import FastMCP
 from mcp.server.fastmcp.prompts import Prompt
 
 from .utils.config import CURRENT_PROJECT, get_config
-from .utils.paths import settings_dict
+from .utils.paths import (
+    settings_dict,
+    nbdev_generation,
+    nbdev_settings_path,
+    nbdev_command_name,
+)
 
 # %% auto 0
 __all__ = ['get_python_3_9_plus_package_file', 'get_python_3_8_minus_package_file', 'get_bundled_template',
@@ -78,15 +83,38 @@ def prompt_context() -> Dict[str, Any]:
     """Compute default formatting context for prompts.
     
     Returns a dict with keys:
-    - lib: The library name from settings.ini (or '<lib_name>' placeholder)
+    - lib: The library name from nbdev settings (or '<lib_name>' placeholder)
     - nbs_path: The notebooks directory (default 'nbs')
+    - nbdev_generation: Detected generation (v2/v3)
+    - nbdev_settings_file: Detected config filename
+    - nbdev_*_cmd: Version-aware command names
     """
     p = CURRENT_PROJECT
-    ctx: Dict[str, Any] = {"lib": "<lib_name>", "nbs_path": "nbs"}
+    ctx: Dict[str, Any] = {
+        "lib": "<lib_name>",
+        "nbs_path": "nbs",
+        "nbdev_generation": "v2",
+        "nbdev_settings_file": "settings.ini",
+        "nbdev_prepare_cmd": "nbdev_prepare",
+        "nbdev_export_cmd": "nbdev_export",
+        "nbdev_test_cmd": "nbdev_test",
+        "nbdev_readme_cmd": "nbdev_readme",
+    }
     if p and Path(p).exists():
-        s = settings_dict(Path(p))
+        project = Path(p)
+        s = settings_dict(project)
         ctx["lib"] = s.get("lib_name") or ctx["lib"]
         ctx["nbs_path"] = s.get("nbs_path") or ctx["nbs_path"]
+        settings_file = nbdev_settings_path(project)
+        if settings_file is not None:
+            ctx["nbdev_settings_file"] = settings_file.name
+        generation = nbdev_generation(project)
+        if generation != "unknown":
+            ctx["nbdev_generation"] = generation
+        ctx["nbdev_prepare_cmd"] = nbdev_command_name(project, "prepare")
+        ctx["nbdev_export_cmd"] = nbdev_command_name(project, "export")
+        ctx["nbdev_test_cmd"] = nbdev_command_name(project, "test")
+        ctx["nbdev_readme_cmd"] = nbdev_command_name(project, "readme")
     return ctx
 
 
