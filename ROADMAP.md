@@ -24,7 +24,7 @@
 - Added coverage in `tests/test_project_tools.py` for new governance tools.
 - Added safe repo markdown resources (`nbdev://repo-markdown` and template `nbdev://repo-markdown/{doc_key}`).
 - Added transport parity for no-subcommand CLI mode (`--host/--port/--path/--watch` options).
-- Migrated `scripts/mcp.nbdev.py` to a thin compatibility wrapper over `nbdev_mcp.mcp.main`.
+- Removed legacy reference scripts under `scripts/`; maintained MCP logic now lives in notebook-backed modules.
 
 **Prior Updates (2026-02-06):**
 - Weighted dead-code analysis by module depth and tutorial usage.

@@ -1,8 +1,6 @@
-"""CLI behavior tests for nbdev_mcp.mcp callback and script wrappers."""
+"""CLI behavior tests for nbdev_mcp.mcp callback forwarding."""
 
 from __future__ import annotations
-
-from pathlib import Path
 
 import nbdev_mcp.mcp as mcp_module
 
@@ -74,12 +72,3 @@ def test_callback_skips_run_when_subcommand_present(monkeypatch):
     )
 
     assert called["value"] is False
-
-
-def test_mcp_nbdev_script_is_thin_wrapper():
-    """scripts/mcp.nbdev.py should be a thin compatibility wrapper."""
-    script_path = Path(__file__).resolve().parent.parent / "scripts" / "mcp.nbdev.py"
-    text = script_path.read_text(encoding="utf-8")
-
-    assert "from nbdev_mcp.mcp import main" in text
-    assert "main()" in text
