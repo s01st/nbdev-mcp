@@ -16,6 +16,9 @@ New features
 - Removed duplicate README link-reference definitions and aligned developer-guide naming to `nbdev_mcp`.
 - Added safe repo markdown resources: `nbdev://repo-markdown` plus template `nbdev://repo-markdown/{doc_key}`.
 - Added resource safety guards and coverage for traversal prevention, suffix filtering, and truncation behavior.
+- Added CLI transport parity in default mode (`nbdev-mcp --transport ... --host ... --port ... --path ...`).
+- Replaced `scripts/mcp.nbdev.py` with a thin compatibility wrapper that delegates to `nbdev_mcp.mcp.main`.
+- Added regression tests for CLI callback forwarding and wrapper behavior.
 
 ## 2026-02-06 (Unreleased)
 

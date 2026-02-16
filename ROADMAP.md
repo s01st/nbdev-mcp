@@ -23,6 +23,8 @@
 - Added `mcp_policy_pack` with strict/balanced/advisory governance profiles.
 - Added coverage in `tests/test_project_tools.py` for new governance tools.
 - Added safe repo markdown resources (`nbdev://repo-markdown` and template `nbdev://repo-markdown/{doc_key}`).
+- Added transport parity for no-subcommand CLI mode (`--host/--port/--path/--watch` options).
+- Migrated `scripts/mcp.nbdev.py` to a thin compatibility wrapper over `nbdev_mcp.mcp.main`.
 
 **Prior Updates (2026-02-06):**
 - Weighted dead-code analysis by module depth and tutorial usage.
@@ -40,8 +42,7 @@
 
 ## Current Open Items
 
-1. Audit transport/stdio behavior for parity with `scripts/mcp.nbdev.py` (`nbs/30_mcp.ipynb`).
-2. Migrate remaining script-only features into nbdev modules; keep `scripts/mcp.nbdev.py` as a thin wrapper.
+No high-priority open items remain from this roadmap section.
 
 ## Operational Guardrails (Bad Request Mitigation)
 

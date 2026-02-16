@@ -159,13 +159,45 @@ def callback(
         "-t", "--transport", help="Transport mode.",
         envvar="NBDEV_MCP_TRANSPORT"
     )] = Transport.stdio,
+    host: Annotated[str, typer.Option(
+        "-H", "--host", help="Host for HTTP transport.",
+        envvar="NBDEV_MCP_HOST"
+    )] = "127.0.0.1",
+    port: Annotated[int, typer.Option(
+        "-P", "--port", help="Port for HTTP transport.",
+        envvar="NBDEV_MCP_PORT"
+    )] = 8000,
+    path: Annotated[str, typer.Option(
+        "--path", help="URL path for HTTP.",
+        envvar="NBDEV_MCP_PATH"
+    )] = "/mcp",
     verbose: Annotated[bool, typer.Option(
         "-v", "--verbose", help="Enable debug output."
     )] = False,
+    watch: Annotated[bool, typer.Option(
+        "-w", "--watch", help="Watch notebooks and auto-export."
+    )] = False,
+    watch_interval: Annotated[float, typer.Option(
+        "--watch-interval", help="Watch polling interval (seconds)."
+    )] = 2.0,
+    watch_cmd: Annotated[str, typer.Option(
+        "--watch-cmd", help="Command on change."
+    )] = "nbdev_export",
 ):
     """Run the MCP server (default command)."""
     if ctx.invoked_subcommand is None:
-        _run_server(project=project, transport=transport, verbose=verbose)
+        _run_server(
+            project=project,
+            transport=transport,
+            host=host,
+            port=port,
+            path=path,
+            verbose=verbose,
+            watch=watch,
+            watch_interval=watch_interval,
+            watch_cmd=watch_cmd,
+        )
+
 
 # %% ../nbs/30_mcp.ipynb 12
 #| export
