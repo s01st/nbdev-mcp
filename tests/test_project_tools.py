@@ -14,6 +14,11 @@ from nbdev_mcp.tools.project import (
     config_status,
     prompt_templates_status,
     mcp_scaffold_guide,
+    scaffold_mcp_notebooks,
+    mcp_contract_snapshot,
+    mcp_contract_diff,
+    mcp_provider_drift_report,
+    mcp_composition_workbench,
 )
 
 
@@ -280,11 +285,86 @@ class TestMcpScaffoldGuide:
         assert result["ok"] is True
         assert result["server_name"] == "mcp.custom"
         assert isinstance(result["notebooks"], list)
-        assert isinstance(result["exported_symbols"], list)
         assert isinstance(result["checklist"], list)
+        assert "settings_patch" in result
 
     def test_mcp_scaffold_guide_respects_arguments(self):
         """Guide should reflect server_name/module_prefix arguments."""
         result = mcp_scaffold_guide(server_name="mcp.demo", module_prefix="70_demo")
         assert result["server_name"] == "mcp.demo"
-        assert all(path.startswith("nbs/70_demo/") for path in result["notebooks"])
+        assert all(item["path"].startswith("nbs/70_demo/") for item in result["notebooks"])
+
+
+class TestScaffoldMcpNotebooks:
+    """Tests for scaffold_mcp_notebooks tool."""
+
+    def test_scaffold_mcp_notebooks_dry_run(self, temp_project):
+        """Dry run should report planned file creation."""
+        result = scaffold_mcp_notebooks(
+            project=str(temp_project),
+            module_prefix="70_factory",
+            package_name="factory_pkg",
+            dry_run=True,
+        )
+        assert result["ok"] is True
+        assert result["create_count"] == 5
+        assert all("nbs/70_factory/" in path for path in result["create_paths"])
+
+    def test_scaffold_mcp_notebooks_writes_files(self, temp_project):
+        """Non-dry run should create notebook files."""
+        result = scaffold_mcp_notebooks(
+            project=str(temp_project),
+            module_prefix="71_factory",
+            package_name="factory_pkg",
+            dry_run=False,
+        )
+        assert result["ok"] is True
+        assert result["created_count"] == 5
+        for path in result["created_paths"]:
+            assert Path(path).exists()
+
+
+class TestMcpContractTools:
+    """Tests for MCP contract snapshot/diff tools."""
+
+    def test_mcp_contract_snapshot_in_memory(self):
+        """Snapshot should return contract metadata without writing."""
+        result = mcp_contract_snapshot(write_file=False)
+        assert result["ok"] is True
+        contract = result["contract"]
+        assert contract["tool_count"] > 0
+        assert len(contract["contract_hash"]) == 64
+
+    def test_mcp_contract_snapshot_write_and_diff(self, tmp_path):
+        """Snapshot file should be consumable by contract diff tool."""
+        baseline_path = tmp_path / "contract.json"
+        snap = mcp_contract_snapshot(
+            output_path=str(baseline_path),
+            write_file=True,
+        )
+        assert snap["ok"] is True
+        assert baseline_path.exists()
+
+        diff = mcp_contract_diff(baseline_path=str(baseline_path))
+        assert diff["ok"] is True
+        assert "breaking" in diff
+
+
+class TestMcpOpsTools:
+    """Tests for MCP operational planning/reporting tools."""
+
+    def test_provider_drift_report_returns_rows(self):
+        """Provider drift report should return provider summaries."""
+        result = mcp_provider_drift_report()
+        assert result["ok"] is True
+        assert "providers" in result
+        assert isinstance(result["providers"], list)
+        assert len(result["providers"]) >= 1
+
+    def test_composition_workbench_returns_plan(self):
+        """Composition workbench should produce architecture recommendations."""
+        result = mcp_composition_workbench(local_servers=2, remote_servers=1, requires_transforms=True)
+        assert result["ok"] is True
+        assert isinstance(result["architecture"], list)
+        assert isinstance(result["recommendations"], list)
+        assert len(result["recommendations"]) > 0

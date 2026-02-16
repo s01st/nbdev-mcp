@@ -7,6 +7,9 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 
 import os
+import json
+import asyncio
+import hashlib
 from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
@@ -29,7 +32,11 @@ from ..utils.rich import render_result, render_table
 # %% auto 0
 __all__ = ['TOOL_ANNOTATIONS', 'set_project', 'current_project', 'console_scripts_status', 'find_projects', 'bookmark_project',
            'list_bookmarks', 'remove_bookmark', 'config_status', 'prompt_templates_status', 'health_check',
-           'mcp_scaffold_guide', 'add_project_tools', 'analyze_remote', 'server_metrics']
+           'split_source_lines', 'make_markdown_cell', 'make_code_cell', 'make_notebook_payload',
+           'build_mcp_scaffold_plan', 'mcp_scaffold_guide', 'scaffold_mcp_notebooks', 'normalize_json_value',
+           'schema_hash', 'collect_contract_async', 'mcp_contract_snapshot', 'mcp_contract_diff',
+           'provider_entry_matches_expected', 'mcp_provider_drift_report', 'mcp_composition_workbench',
+           'add_project_tools', 'analyze_remote', 'server_metrics']
 
 # %% ../../nbs/11_tools/01_project.ipynb 6
 def set_project(selector: str) -> Dict[str, Any]:
@@ -370,50 +377,591 @@ def health_check() -> Dict[str, Any]:
     return {'ok': health['status'] != 'error', **health, 'pretty': pretty}
 
 # %% ../../nbs/11_tools/01_project.ipynb 18
+def split_source_lines(source: str) -> List[str]:
+    """Split notebook cell source into newline-preserving lines."""
+    if source == '':
+        return []
+    return source.splitlines(keepends=True)
+
+
+def make_markdown_cell(source: str) -> Dict[str, Any]:
+    """Create a markdown notebook cell payload."""
+    return {
+        'cell_type': 'markdown',
+        'metadata': {},
+        'source': split_source_lines(source),
+    }
+
+
+def make_code_cell(source: str) -> Dict[str, Any]:
+    """Create a code notebook cell payload."""
+    return {
+        'cell_type': 'code',
+        'metadata': {},
+        'execution_count': None,
+        'outputs': [],
+        'source': split_source_lines(source),
+    }
+
+
+def make_notebook_payload(cells: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Create a minimal notebook payload."""
+    return {
+        'cells': cells,
+        'metadata': {
+            'kernelspec': {
+                'display_name': 'Python 3',
+                'language': 'python',
+                'name': 'python3',
+            },
+            'language_info': {'name': 'python'},
+        },
+        'nbformat': 4,
+        'nbformat_minor': 5,
+    }
+
+
+def build_mcp_scaffold_plan(
+    server_name: str = 'mcp.custom',
+    module_prefix: str = '50_mcp',
+    package_name: str = 'mcp_custom',
+) -> Dict[str, Any]:
+    """Build a notebook-first MCP scaffold plan."""
+    notebooks = [
+        {
+            'path': f'nbs/{module_prefix}/00__init__.ipynb',
+            'default_exp': f'{package_name}.mcp_init',
+            'purpose': 'Module bootstrap and exports',
+        },
+        {
+            'path': f'nbs/{module_prefix}/01_server.ipynb',
+            'default_exp': f'{package_name}.server',
+            'purpose': 'FastMCP server composition root',
+        },
+        {
+            'path': f'nbs/{module_prefix}/02_tools.ipynb',
+            'default_exp': f'{package_name}.tools',
+            'purpose': 'Tool registration and implementations',
+        },
+        {
+            'path': f'nbs/{module_prefix}/03_prompts.ipynb',
+            'default_exp': f'{package_name}.prompts',
+            'purpose': 'Prompt definitions and prompt registry',
+        },
+        {
+            'path': f'nbs/{module_prefix}/04_cli.ipynb',
+            'default_exp': f'{package_name}.cli',
+            'purpose': 'CLI entrypoint and run helpers',
+        },
+    ]
+
+    settings_patch = {
+        'lib_name': package_name,
+        'nbs_path': 'nbs',
+        'console_scripts': f'{package_name}={package_name}.cli:main',
+    }
+
+    checklist = [
+        'Create notebooks under nbs/ with one responsibility per notebook.',
+        'Set #| default_exp and #| export cells for public API.',
+        'Compose server in one create_server(...) function.',
+        'Wire add_*_tools and add_prompts from exported modules.',
+        'Expose CLI via settings console_scripts.',
+        'Run nbdev_export and test before install.',
+    ]
+
+    return {
+        'server_name': server_name,
+        'module_prefix': module_prefix,
+        'package_name': package_name,
+        'notebooks': notebooks,
+        'settings_patch': settings_patch,
+        'checklist': checklist,
+    }
+
+
 def mcp_scaffold_guide(
-    server_name: str = "mcp.custom",
-    module_prefix: str = "50_mcp",
+    server_name: str = 'mcp.custom',
+    module_prefix: str = '50_mcp',
+    package_name: str = 'mcp_custom',
 ) -> Dict[str, Any]:
     """Tool: Return a notebook-first scaffold guide for building a new MCP server.
 
     The guide follows this project's conventions:
     - All scripting logic lives under ``nbs/``
     - Exported APIs are surfaced via nbdev settings
-    - Generated ``.py`` modules are treated as build artifacts
+    - Generated ``.py`` modules are build artifacts
     """
-    notebooks = [
-        f"nbs/{module_prefix}/00__init__.ipynb",
-        f"nbs/{module_prefix}/01_server.ipynb",
-        f"nbs/{module_prefix}/02_tools.ipynb",
-        f"nbs/{module_prefix}/03_prompts.ipynb",
-        f"nbs/{module_prefix}/04_cli.ipynb",
-    ]
+    plan = build_mcp_scaffold_plan(server_name=server_name, module_prefix=module_prefix, package_name=package_name)
+    pretty = render_result('MCP Scaffold Guide', plan)
+    return {'ok': True, **plan, 'pretty': pretty}
 
-    exported_symbols = [
-        "create_server",
-        "add_tools",
-        "add_prompts",
-        "main",
-    ]
 
-    checklist = [
-        "Create notebooks under nbs/ with one responsibility per notebook.",
-        "Set #| default_exp and #| export cells for public API.",
-        "Wire resources/tools/prompts in a create_server(...) composition root.",
-        "Add console_scripts entry in settings.ini for the new CLI entrypoint.",
-        "Run nbdev_export after notebook edits.",
-        "Add tests for tool registration and config mutation behavior.",
-    ]
+def scaffold_mcp_notebooks(
+    project: Optional[str] = None,
+    server_name: str = 'mcp.custom',
+    module_prefix: str = '50_mcp',
+    package_name: str = 'mcp_custom',
+    dry_run: bool = True,
+    overwrite: bool = False,
+) -> Dict[str, Any]:
+    """Tool: Create notebook scaffold files for a new MCP module.
+
+    Parameters
+    ----------
+    project : str, optional
+        Project path or alias.
+    server_name : str
+        FastMCP server name.
+    module_prefix : str
+        Notebook folder under nbs/ (e.g. ``50_mcp``).
+    package_name : str
+        Package/module base name for generated ``default_exp`` values.
+    dry_run : bool
+        If True, report what would be created without writing files.
+    overwrite : bool
+        If True, overwrite existing notebooks.
+    """
+    try:
+        p = resolve_selector(project)
+    except Exception as e:
+        return {'ok': False, 'error': str(e)}
+
+    plan = build_mcp_scaffold_plan(server_name=server_name, module_prefix=module_prefix, package_name=package_name)
+    target_dir = p / 'nbs' / module_prefix
+
+    notebook_templates: Dict[str, Dict[str, Any]] = {}
+    for item in plan['notebooks']:
+        nb_path = p / item['path']
+        default_exp = item['default_exp']
+        purpose = item['purpose']
+
+        if item['path'].endswith('00__init__.ipynb'):
+            code_body = (
+                f"#| export\n"
+                f"from mcp.server.fastmcp import FastMCP\n\n"
+                f"def create_server(name: str = '{server_name}') -> FastMCP:\n"
+                f"    \"\"\"Create base MCP server.\"\"\"\n"
+                f"    return FastMCP(name)\n"
+            )
+        elif item['path'].endswith('01_server.ipynb'):
+            code_body = (
+                f"#| export\n"
+                f"from {package_name}.mcp_init import create_server\n"
+                f"from {package_name}.tools import add_tools\n"
+                f"from {package_name}.prompts import add_prompts\n\n"
+                f"def build_server(name: str = '{server_name}'):\n"
+                f"    server = create_server(name)\n"
+                f"    add_tools(server)\n"
+                f"    add_prompts(server)\n"
+                f"    return server\n"
+            )
+        elif item['path'].endswith('02_tools.ipynb'):
+            code_body = (
+                "#| export\n"
+                "def add_tools(mcp):\n"
+                "    @mcp.tool()\n"
+                "    def health() -> dict:\n"
+                "        return {'ok': True, 'message': 'healthy'}\n"
+            )
+        elif item['path'].endswith('03_prompts.ipynb'):
+            code_body = (
+                "#| export\n"
+                "def add_prompts(mcp):\n"
+                "    @mcp.prompt()\n"
+                "    def system_prompt() -> str:\n"
+                "        return 'You are an MCP agent.'\n"
+            )
+        else:
+            code_body = (
+                f"#| export\n"
+                f"from {package_name}.server import build_server\n\n"
+                f"def main() -> None:\n"
+                f"    build_server().run(transport='stdio')\n"
+            )
+
+        notebook_templates[str(nb_path)] = make_notebook_payload([
+            make_markdown_cell(f"# {purpose}\n"),
+            make_code_cell(f"#| default_exp {default_exp}\n"),
+            make_code_cell(code_body),
+        ])
+
+    existing = [path for path in notebook_templates.keys() if Path(path).exists()]
+    to_create = [path for path in notebook_templates.keys() if path not in existing or overwrite]
+    blocked = [path for path in existing if not overwrite]
+
+    if dry_run:
+        result = {
+            'ok': True,
+            'project': str(p),
+            'target_dir': str(target_dir),
+            'server_name': server_name,
+            'module_prefix': module_prefix,
+            'package_name': package_name,
+            'create_count': len(to_create),
+            'create_paths': to_create,
+            'blocked_existing': blocked,
+        }
+        pretty = render_result('MCP Notebook Scaffold (dry-run)', result)
+        return {**result, 'pretty': pretty}
+
+    target_dir.mkdir(parents=True, exist_ok=True)
+    created: List[str] = []
+    for nb_path, payload in notebook_templates.items():
+        path_obj = Path(nb_path)
+        if path_obj.exists() and not overwrite:
+            continue
+        path_obj.parent.mkdir(parents=True, exist_ok=True)
+        path_obj.write_text(json.dumps(payload, indent=2) + '\n', encoding='utf-8')
+        created.append(nb_path)
 
     result = {
-        "ok": True,
-        "server_name": server_name,
-        "notebooks": notebooks,
-        "exported_symbols": exported_symbols,
-        "checklist": checklist,
+        'ok': True,
+        'project': str(p),
+        'created_count': len(created),
+        'created_paths': created,
+        'blocked_existing': blocked,
+        'next_steps': [
+            'Run nbdev_export',
+            'Add module imports in nbs/11_tools/00__init__.ipynb if needed',
+            'Add tests for new tools/resources/prompts',
+        ],
     }
-    pretty = render_result("MCP Scaffold Guide", result)
-    return {**result, "pretty": pretty}
+    pretty = render_result('MCP Notebook Scaffold', result)
+    return {**result, 'pretty': pretty}
+
+
+def normalize_json_value(value: Any) -> Any:
+    """Normalize values for deterministic JSON serialization."""
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, list):
+        return [normalize_json_value(v) for v in value]
+    if isinstance(value, dict):
+        return {str(k): normalize_json_value(v) for k, v in value.items()}
+    if hasattr(value, 'model_dump'):
+        return normalize_json_value(value.model_dump())
+    if hasattr(value, 'dict'):
+        return normalize_json_value(value.dict())
+    return str(value)
+
+
+def schema_hash(value: Any) -> str:
+    """Create a stable hash for schema-like payloads."""
+    normalized = normalize_json_value(value)
+    encoded = json.dumps(normalized, sort_keys=True, separators=(',', ':'))
+    return hashlib.sha256(encoded.encode('utf-8')).hexdigest()
+
+
+async def collect_contract_async(server_name: str = 'mcp.nbdev') -> Dict[str, Any]:
+    """Collect MCP server contract data asynchronously."""
+    from nbdev_mcp.mcp import create_nbdev_mcp
+
+    server = create_nbdev_mcp(name=server_name)
+    tools = await server.list_tools()
+    resources = await server.list_resources()
+    prompts = await server.list_prompts()
+
+    tool_items = []
+    for tool in tools:
+        input_schema = normalize_json_value(getattr(tool, 'inputSchema', {}))
+        output_schema = normalize_json_value(getattr(tool, 'outputSchema', {}))
+        tool_items.append({
+            'name': tool.name,
+            'description': tool.description,
+            'input_schema': input_schema,
+            'output_schema': output_schema,
+            'input_schema_hash': schema_hash(input_schema),
+            'output_schema_hash': schema_hash(output_schema),
+        })
+
+    resource_items = []
+    for resource in resources:
+        resource_items.append({
+            'name': getattr(resource, 'name', ''),
+            'uri': str(getattr(resource, 'uri', '')),
+            'description': getattr(resource, 'description', ''),
+        })
+
+    prompt_items = []
+    for prompt in prompts:
+        prompt_items.append({
+            'name': getattr(prompt, 'name', ''),
+            'description': getattr(prompt, 'description', ''),
+            'arguments': normalize_json_value(getattr(prompt, 'arguments', [])),
+        })
+
+    signature = {
+        'tools': [{'name': t['name'], 'input_schema_hash': t['input_schema_hash'], 'output_schema_hash': t['output_schema_hash']} for t in sorted(tool_items, key=lambda x: x['name'])],
+        'resources': sorted([r['uri'] for r in resource_items]),
+        'prompts': sorted([p['name'] for p in prompt_items]),
+    }
+
+    contract_hash = schema_hash(signature)
+
+    from datetime import datetime, timezone
+    return {
+        'server_name': server_name,
+        'generated_at': datetime.now(timezone.utc).isoformat(),
+        'tool_count': len(tool_items),
+        'resource_count': len(resource_items),
+        'prompt_count': len(prompt_items),
+        'tools': sorted(tool_items, key=lambda x: x['name']),
+        'resources': sorted(resource_items, key=lambda x: x['uri']),
+        'prompts': sorted(prompt_items, key=lambda x: x['name']),
+        'contract_hash': contract_hash,
+    }
+
+
+def mcp_contract_snapshot(
+    server_name: str = 'mcp.nbdev',
+    output_path: str = 'contracts/mcp_contract.json',
+    project: Optional[str] = None,
+    write_file: bool = False,
+) -> Dict[str, Any]:
+    """Tool: Generate an MCP contract snapshot for compatibility checks."""
+    try:
+        contract = asyncio.run(collect_contract_async(server_name=server_name))
+    except RuntimeError as e:
+        return {'ok': False, 'error': f'Could not collect contract in current event loop: {e}'}
+    except Exception as e:
+        return {'ok': False, 'error': str(e)}
+
+    result = {
+        'ok': True,
+        'contract': contract,
+        'server_name': server_name,
+        'contract_hash': contract['contract_hash'],
+    }
+
+    if write_file:
+        base = resolve_selector(project) if project else Path.cwd()
+        target = (base / output_path).resolve()
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(json.dumps(result, indent=2) + '\n', encoding='utf-8')
+        result['output_path'] = str(target)
+
+    pretty_meta = {
+        'server_name': server_name,
+        'tool_count': contract['tool_count'],
+        'resource_count': contract['resource_count'],
+        'prompt_count': contract['prompt_count'],
+        'contract_hash': contract['contract_hash'][:12],
+        'write_file': write_file,
+        'output_path': result.get('output_path', 'not written'),
+    }
+    result['pretty'] = render_result('MCP Contract Snapshot', pretty_meta)
+    return result
+
+
+def mcp_contract_diff(
+    baseline_path: str,
+    current_path: Optional[str] = None,
+    server_name: str = 'mcp.nbdev',
+) -> Dict[str, Any]:
+    """Tool: Compare a baseline MCP contract against current contract."""
+    baseline_file = expand(baseline_path)
+    if not baseline_file.exists():
+        return {'ok': False, 'error': f'Baseline not found: {baseline_file}'}
+
+    baseline_payload = json.loads(baseline_file.read_text(encoding='utf-8'))
+    baseline_contract = baseline_payload.get('contract', baseline_payload)
+
+    if current_path:
+        current_file = expand(current_path)
+        if not current_file.exists():
+            return {'ok': False, 'error': f'Current contract not found: {current_file}'}
+        current_payload = json.loads(current_file.read_text(encoding='utf-8'))
+        current_contract = current_payload.get('contract', current_payload)
+    else:
+        current_snapshot = mcp_contract_snapshot(server_name=server_name, write_file=False)
+        if not current_snapshot.get('ok'):
+            return current_snapshot
+        current_contract = current_snapshot['contract']
+
+    baseline_tools = {t['name']: t for t in baseline_contract.get('tools', [])}
+    current_tools = {t['name']: t for t in current_contract.get('tools', [])}
+
+    baseline_tool_names = set(baseline_tools)
+    current_tool_names = set(current_tools)
+
+    added_tools = sorted(current_tool_names - baseline_tool_names)
+    removed_tools = sorted(baseline_tool_names - current_tool_names)
+
+    changed_tool_schemas: List[str] = []
+    for name in sorted(baseline_tool_names & current_tool_names):
+        base_schema = baseline_tools[name].get('input_schema_hash')
+        curr_schema = current_tools[name].get('input_schema_hash')
+        base_output = baseline_tools[name].get('output_schema_hash')
+        curr_output = current_tools[name].get('output_schema_hash')
+        if base_schema != curr_schema or base_output != curr_output:
+            changed_tool_schemas.append(name)
+
+    baseline_resources = {r.get('uri', '') for r in baseline_contract.get('resources', [])}
+    current_resources = {r.get('uri', '') for r in current_contract.get('resources', [])}
+    added_resources = sorted(current_resources - baseline_resources)
+    removed_resources = sorted(baseline_resources - current_resources)
+
+    baseline_prompts = {p.get('name', '') for p in baseline_contract.get('prompts', [])}
+    current_prompts = {p.get('name', '') for p in current_contract.get('prompts', [])}
+    added_prompts = sorted(current_prompts - baseline_prompts)
+    removed_prompts = sorted(baseline_prompts - current_prompts)
+
+    breaking = bool(removed_tools or changed_tool_schemas or removed_resources or removed_prompts)
+
+    result = {
+        'ok': True,
+        'breaking': breaking,
+        'added_tools': added_tools,
+        'removed_tools': removed_tools,
+        'changed_tool_schemas': changed_tool_schemas,
+        'added_resources': added_resources,
+        'removed_resources': removed_resources,
+        'added_prompts': added_prompts,
+        'removed_prompts': removed_prompts,
+        'baseline_hash': baseline_contract.get('contract_hash', ''),
+        'current_hash': current_contract.get('contract_hash', ''),
+    }
+    result['pretty'] = render_result('MCP Contract Diff', result)
+    return result
+
+
+def provider_entry_matches_expected(provider_name: str, expected: Dict[str, Any], actual: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """Compare required provider entry keys for drift checks."""
+    if not isinstance(actual, dict):
+        return {'matches': False, 'mismatches': ['missing entry']}
+
+    keys = ['command', 'args']
+    if provider_name in {'vscode', 'cursor'}:
+        keys = ['type', 'command', 'args']
+
+    mismatches: List[str] = []
+    for key in keys:
+        if actual.get(key) != expected.get(key):
+            mismatches.append(f"{key}: expected {expected.get(key)!r}, got {actual.get(key)!r}")
+
+    return {'matches': len(mismatches) == 0, 'mismatches': mismatches}
+
+
+def mcp_provider_drift_report(provider: Optional[str] = None) -> Dict[str, Any]:
+    """Tool: Report drift between provider config and expected nbdev-mcp config."""
+    import nbdev_mcp.mcp as mcp_module
+
+    if provider:
+        try:
+            providers = [mcp_module.Provider(provider.lower())]
+        except Exception:
+            valid = ', '.join(p.value for p in mcp_module.Provider)
+            return {'ok': False, 'error': f'Unknown provider: {provider}. Valid: {valid}'}
+    else:
+        providers = list(mcp_module.Provider)
+
+    reports: List[Dict[str, Any]] = []
+
+    for provider_enum in providers:
+        status = mcp_module.check_provider_status(provider_enum)
+        expected = mcp_module.make_server_config_for_provider(provider_enum, auto_start=False)
+        suggestion = f"python -m nbdev_mcp update {provider_enum.value} --strategy merge --dry-run"
+
+        report = {
+            'provider': provider_enum.value,
+            'exists': status.get('exists', False),
+            'installed': status.get('installed', False),
+            'path': status.get('path', ''),
+            'format': status.get('format', 'json'),
+            'drifted': False,
+            'mismatches': [],
+            'suggestion': suggestion,
+        }
+
+        if not report['exists']:
+            report['drifted'] = True
+            report['mismatches'] = ['config missing']
+            reports.append(report)
+            continue
+
+        try:
+            config_path = Path(report['path'])
+            config_format = report['format']
+            config_text = config_path.read_text(encoding='utf-8')
+
+            if config_format == 'toml':
+                config = mcp_module.parse_toml(config_text)
+                actual_entry = config.get('mcp_servers', {}).get('nbdev')
+            else:
+                config = mcp_module.parse_jsonc(config_text)
+                mcp_key = mcp_module.get_mcp_key(provider_enum, config_format=config_format)
+                actual_entry = config.get(mcp_key, {}).get('nbdev') if isinstance(config.get(mcp_key), dict) else None
+
+            compare = provider_entry_matches_expected(provider_enum.value, expected, actual_entry)
+            report['drifted'] = not compare['matches']
+            report['mismatches'] = compare['mismatches']
+        except Exception as e:
+            report['drifted'] = True
+            report['mismatches'] = [f'parse/read error: {e}']
+
+        reports.append(report)
+
+    rows = [[r['provider'], 'yes' if r['drifted'] else 'no', '; '.join(r['mismatches']) or '-', r['path']] for r in reports]
+    pretty = render_table('Provider Drift Report', ['provider', 'drifted', 'mismatches', 'path'], rows)
+
+    return {
+        'ok': True,
+        'providers': reports,
+        'drifted_count': sum(1 for r in reports if r['drifted']),
+        'pretty': pretty,
+    }
+
+
+def mcp_composition_workbench(
+    local_servers: int = 1,
+    remote_servers: int = 0,
+    requires_transforms: bool = True,
+    requires_strict_auth: bool = False,
+    latency_budget_ms: int = 250,
+) -> Dict[str, Any]:
+    """Tool: Recommend MCP composition strategy beyond basic FastMCP setup."""
+    recommendations: List[str] = []
+    architecture: List[str] = []
+
+    if local_servers > 1:
+        architecture.append('Use mount-based composition for local servers.')
+        recommendations.append('Apply namespace transforms to avoid tool collisions.')
+
+    if remote_servers > 0:
+        architecture.append('Use proxy/provider composition for remote servers.')
+        recommendations.append('Add timeout/retry policy and health checks for remote links.')
+
+    if requires_transforms:
+        recommendations.append('Model transform chain explicitly: visibility -> namespace -> schema transforms.')
+
+    if requires_strict_auth:
+        recommendations.append('Use authorization layers and component visibility gates per server boundary.')
+
+    if latency_budget_ms <= 150:
+        recommendations.append('Favor local mounts and minimize proxy hops to keep latency within strict budget.')
+    elif latency_budget_ms >= 500:
+        recommendations.append('Latency budget allows richer proxy/middleware layers and contract checks in runtime path.')
+
+    if not architecture:
+        architecture.append('Single-server FastMCP setup is sufficient; add NBDevMCP only for CI/contracts/ops features.')
+
+    plan = {
+        'local_servers': local_servers,
+        'remote_servers': remote_servers,
+        'requires_transforms': requires_transforms,
+        'requires_strict_auth': requires_strict_auth,
+        'latency_budget_ms': latency_budget_ms,
+        'architecture': architecture,
+        'recommendations': recommendations,
+        'next_actions': [
+            'Generate scaffold with mcp_scaffold_guide / scaffold_mcp_notebooks.',
+            'Capture baseline contract with mcp_contract_snapshot(write_file=True).',
+            'Track drift with mcp_provider_drift_report and update dry-runs.',
+        ],
+    }
+    pretty = render_result('MCP Composition Workbench', plan)
+    return {'ok': True, **plan, 'pretty': pretty}
 
 
 # %% ../../nbs/11_tools/01_project.ipynb 20
@@ -497,6 +1045,36 @@ TOOL_ANNOTATIONS = {
         idempotentHint=True,
         openWorldHint=False
     ),
+    'scaffold_mcp_notebooks': ToolAnnotations(
+        title="Scaffold MCP Notebooks",
+        readOnlyHint=False,
+        idempotentHint=False,
+        openWorldHint=False
+    ),
+    'mcp_contract_snapshot': ToolAnnotations(
+        title="MCP Contract Snapshot",
+        readOnlyHint=True,
+        idempotentHint=True,
+        openWorldHint=False
+    ),
+    'mcp_contract_diff': ToolAnnotations(
+        title="MCP Contract Diff",
+        readOnlyHint=True,
+        idempotentHint=True,
+        openWorldHint=False
+    ),
+    'mcp_provider_drift_report': ToolAnnotations(
+        title="MCP Provider Drift",
+        readOnlyHint=True,
+        idempotentHint=True,
+        openWorldHint=False
+    ),
+    'mcp_composition_workbench': ToolAnnotations(
+        title="MCP Composition Workbench",
+        readOnlyHint=True,
+        idempotentHint=True,
+        openWorldHint=False
+    ),
 }
 
 def add_project_tools(mcp: FastMCP) -> None:
@@ -519,6 +1097,11 @@ def add_project_tools(mcp: FastMCP) -> None:
         ('server_metrics', server_metrics),
         ('analyze_remote', analyze_remote),
         ('mcp_scaffold_guide', mcp_scaffold_guide),
+        ('scaffold_mcp_notebooks', scaffold_mcp_notebooks),
+        ('mcp_contract_snapshot', mcp_contract_snapshot),
+        ('mcp_contract_diff', mcp_contract_diff),
+        ('mcp_provider_drift_report', mcp_provider_drift_report),
+        ('mcp_composition_workbench', mcp_composition_workbench),
     ]
 
     for name, func in tools:
