@@ -35,6 +35,8 @@ def temp_nbdev_project(tmp_path: Path) -> Path:
     (tmp_path / "nbs").mkdir()
     (tmp_path / "mylib").mkdir()
     (tmp_path / "mylib" / "__init__.py").write_text("")
+    (tmp_path / ".codex").mkdir()
+    (tmp_path / ".claude").mkdir()
 
     # Create settings.ini
     settings = tmp_path / "settings.ini"
@@ -77,6 +79,11 @@ version = 0.0.1
 
     nb_path = tmp_path / "nbs" / "00_core.ipynb"
     nb_path.write_text(json.dumps(nb_data, indent=2))
+
+    # Create markdown docs for repo-markdown resources
+    (tmp_path / "ROADMAP.md").write_text("# Roadmap\n", encoding="utf-8")
+    (tmp_path / ".codex" / "AGENTS.md").write_text("# Agent Notes\n", encoding="utf-8")
+    (tmp_path / ".claude" / "TODOs.md").write_text("# TODOs\n", encoding="utf-8")
 
     return tmp_path
 
@@ -206,6 +213,7 @@ class TestListResources:
             "nbdev://tree",
             "nbdev://roadmap",
             "nbdev://settings",
+            "nbdev://repo-markdown",
         }
 
         for uri in expected_uris:
@@ -216,6 +224,12 @@ class TestListResources:
         resources = await mcp_server.list_resources()
         for resource in resources:
             assert resource.name, f"Resource {resource.uri} missing name"
+
+    async def test_resource_templates_include_repo_markdown(self, mcp_server):
+        """Server should expose a template for reading indexed markdown docs."""
+        templates = await mcp_server.list_resource_templates()
+        template_uris = {str(t.uriTemplate) for t in templates}
+        assert "nbdev://repo-markdown/{doc_key}" in template_uris
 
 
 # =============================================================================
@@ -401,6 +415,22 @@ class TestReadResources:
         """project resource should return project info when set."""
         result = await mcp_with_project.read_resource("nbdev://project")
         assert result is not None
+
+    async def test_read_repo_markdown_index_resource(self, mcp_with_project):
+        """repo-markdown index should include root and agent-scoped docs."""
+        result = await mcp_with_project.read_resource("nbdev://repo-markdown")
+        assert result is not None
+        payload = json.loads(result[0].content)
+        paths = {item["path"] for item in payload["docs"]}
+        assert "ROADMAP.md" in paths
+        assert ".codex/AGENTS.md" in paths
+        assert ".claude/TODOs.md" in paths
+
+    async def test_read_repo_markdown_template_resource(self, mcp_with_project):
+        """Template resource should read markdown by doc key."""
+        result = await mcp_with_project.read_resource("nbdev://repo-markdown/roadmap")
+        assert result is not None
+        assert "# Roadmap" in result[0].content
 
 
 # =============================================================================

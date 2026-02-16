@@ -14,6 +14,8 @@ New features
 - Added fixture-driven provider lifecycle tests for Claude, Cursor, VS Code, and Codex config mutation paths.
 - Updated integration docs in `nbs/index.ipynb` for VS Code update workflow and Cursor installer support.
 - Removed duplicate README link-reference definitions and aligned developer-guide naming to `nbdev_mcp`.
+- Added safe repo markdown resources: `nbdev://repo-markdown` plus template `nbdev://repo-markdown/{doc_key}`.
+- Added resource safety guards and coverage for traversal prevention, suffix filtering, and truncation behavior.
 
 ## 2026-02-06 (Unreleased)
 

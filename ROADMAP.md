@@ -22,6 +22,7 @@
 - Added `mcp_contract_ci_gate` for CI pass/fail contract enforcement.
 - Added `mcp_policy_pack` with strict/balanced/advisory governance profiles.
 - Added coverage in `tests/test_project_tools.py` for new governance tools.
+- Added safe repo markdown resources (`nbdev://repo-markdown` and template `nbdev://repo-markdown/{doc_key}`).
 
 **Prior Updates (2026-02-06):**
 - Weighted dead-code analysis by module depth and tutorial usage.
@@ -39,9 +40,8 @@
 
 ## Current Open Items
 
-1. Add safe read-file resource and document repo-level markdown ingestion (`nbs/10_resources.ipynb`).
-2. Audit transport/stdio behavior for parity with `scripts/mcp.nbdev.py` (`nbs/30_mcp.ipynb`).
-3. Migrate remaining script-only features into nbdev modules; keep `scripts/mcp.nbdev.py` as a thin wrapper.
+1. Audit transport/stdio behavior for parity with `scripts/mcp.nbdev.py` (`nbs/30_mcp.ipynb`).
+2. Migrate remaining script-only features into nbdev modules; keep `scripts/mcp.nbdev.py` as a thin wrapper.
 
 ## Operational Guardrails (Bad Request Mitigation)
 

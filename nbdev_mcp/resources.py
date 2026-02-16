@@ -24,8 +24,10 @@ from nbdev_mcp.utils.paths import (
 
 # %% auto 0
 __all__ = ['resource_project_summary', 'resource_projects', 'resource_tree', 'resource_settings', 'resource_env_file',
-           'resource_read_file', 'resource_roadmap', 'resource_index_to_readme_note', 'resource_learning_links',
-           'resource_version', 'resource_heartbeat', 'add_resources']
+           'safe_project_file_path', 'safe_text_file_suffix', 'resource_read_file', 'list_repo_markdown_paths',
+           'markdown_doc_key', 'repo_markdown_key_map', 'resource_repo_markdown_index', 'resource_repo_markdown',
+           'resource_roadmap', 'resource_index_to_readme_note', 'resource_learning_links', 'resource_version',
+           'resource_heartbeat', 'add_resources']
 
 # %% ../nbs/10_resources.ipynb 6
 def resource_project_summary() -> str:
@@ -119,31 +121,172 @@ def resource_env_file() -> str:
 
 
 # %% ../nbs/10_resources.ipynb 11
+def safe_project_file_path(relpath: str) -> Tuple[Optional[Path], str]:
+    """Validate and resolve a relative file path inside the current project."""
+    project_root = require_project()
+    raw_relpath = (relpath or '').strip()
+
+    if raw_relpath == '':
+        return None, 'No path provided.'
+
+    relpath_obj = Path(raw_relpath)
+    if relpath_obj.is_absolute():
+        return None, 'Absolute paths are not allowed.'
+
+    if '..' in relpath_obj.parts:
+        return None, 'Parent directory traversal is not allowed.'
+
+    candidate = (project_root / relpath_obj).resolve()
+    try:
+        candidate.relative_to(project_root.resolve())
+    except Exception:
+        return None, f'Refusing to read outside project: {candidate}'
+
+    if not candidate.exists():
+        return None, f'Not found: {candidate}'
+
+    if candidate.is_dir():
+        return None, f'Path is a directory: {candidate}'
+
+    return candidate, 'ok'
+
+
+def safe_text_file_suffix(path: Path) -> bool:
+    """Return True when file suffix is in the allowed text-file set."""
+    suffixes = {
+        '.md', '.txt', '.json', '.jsonc', '.toml', '.ini', '.yaml', '.yml',
+        '.py', '.ipynb', '.sh', '.cfg', '.conf',
+    }
+    return path.suffix.lower() in suffixes
+
+
 def resource_read_file(relpath: str) -> str:
-    """Resource: read a file by relative path within the current project.
-    
+    """Resource: read a safe text file by relative path within the current project.
+
     Parameters
     ----------
     relpath : str
         Relative path from project root to the file.
-    
+
     Returns
     -------
     str
-        The file contents, or an error message if not found or outside project.
+        File contents, or a descriptive refusal/error message.
     """
-    p = require_project()
-    f = (p / relpath).resolve()
+    file_path, status = safe_project_file_path(relpath)
+    if file_path is None:
+        return status
+
+    if not safe_text_file_suffix(file_path):
+        return f'Refusing to read non-text file type: {file_path.suffix or "<none>"}'
+
     try:
-        f.relative_to(p)
-    except Exception:
-        return f'Refusing to read outside project: {f}'
-    if not f.exists():
-        return f'Not found: {f}'
-    try:
-        return f.read_text(encoding='utf-8')
+        content = file_path.read_text(encoding='utf-8', errors='replace')
     except Exception as e:
-        return f'Could not read {f}: {e}'
+        return f'Could not read {file_path}: {e}'
+
+    max_chars = 200000
+    if len(content) > max_chars:
+        omitted = len(content) - max_chars
+        return content[:max_chars] + f'\n\n...[truncated {omitted} chars]'
+
+    return content
+
+
+def list_repo_markdown_paths() -> List[str]:
+    """List root-level and agent-scoped markdown files inside the project."""
+    project_root = require_project()
+    relpaths: Set[str] = set()
+
+    for path in sorted(project_root.glob('*.md')):
+        if path.is_file():
+            relpaths.add(str(path.relative_to(project_root)))
+
+    for scoped_dir in ('.claude', '.codex'):
+        scoped_path = project_root / scoped_dir
+        if scoped_path.exists() and scoped_path.is_dir():
+            for path in sorted(scoped_path.rglob('*.md')):
+                if path.is_file():
+                    relpaths.add(str(path.relative_to(project_root)))
+
+    return sorted(relpaths)
+
+
+def markdown_doc_key(relpath: str) -> str:
+    """Convert a markdown relative path into a URI-safe key."""
+    normalized = relpath.replace('\\', '/').lower()
+    if normalized.endswith('.md'):
+        normalized = normalized[:-3]
+
+    chars: List[str] = []
+    for ch in normalized:
+        if ch.isalnum():
+            chars.append(ch)
+        else:
+            chars.append('_')
+
+    key = ''.join(chars)
+    while '__' in key:
+        key = key.replace('__', '_')
+    key = key.strip('_')
+    return key or 'doc'
+
+
+def repo_markdown_key_map() -> Dict[str, str]:
+    """Map stable markdown keys to relative markdown paths."""
+    mapping: Dict[str, str] = {}
+
+    for relpath in list_repo_markdown_paths():
+        base_key = markdown_doc_key(relpath)
+        key = base_key
+        suffix = 2
+
+        while key in mapping and mapping[key] != relpath:
+            key = f'{base_key}_{suffix}'
+            suffix += 1
+
+        mapping[key] = relpath
+
+    return mapping
+
+
+def resource_repo_markdown_index() -> str:
+    """Resource: JSON index of root and agent-scoped markdown docs.
+
+    Returns
+    -------
+    str
+        JSON payload with markdown doc keys and relative paths.
+    """
+    key_map = repo_markdown_key_map()
+    docs = [
+        {'key': key, 'path': relpath}
+        for key, relpath in sorted(key_map.items(), key=lambda item: item[1])
+    ]
+
+    payload = {
+        'count': len(docs),
+        'docs': docs,
+        'usage': 'Read a markdown doc via nbdev://repo-markdown/{doc_key}.',
+        'scope': ['<repo>/*.md', '.claude/**/*.md', '.codex/**/*.md'],
+    }
+    return json.dumps(payload, indent=2)
+
+
+def resource_repo_markdown(doc_key: str) -> str:
+    """Resource template: read a markdown doc by key from the markdown index."""
+    key_map = repo_markdown_key_map()
+    normalized_key = markdown_doc_key(doc_key)
+    relpath = key_map.get(normalized_key)
+
+    if relpath is None:
+        keys = sorted(key_map.keys())
+        preview = ', '.join(keys[:20])
+        if len(keys) > 20:
+            preview += ', ...'
+        return f'Unknown doc key: {doc_key}. Available keys: {preview}'
+
+    return resource_read_file(relpath)
 
 
 # %% ../nbs/10_resources.ipynb 12
@@ -321,6 +464,16 @@ def add_resources(mcp: FastMCP) -> None:
         description="JSON listing of notebooks in the project",
         fn=resource_tree
     ))
+    mcp.add_resource(FunctionResource(
+        uri="nbdev://repo-markdown", name="repo_markdown_index",
+        description="Index of repo-level and agent-scoped markdown docs",
+        fn=resource_repo_markdown_index
+    ))
+    mcp.resource(
+        uri="nbdev://repo-markdown/{doc_key}",
+        name="repo_markdown_doc",
+        description="Read indexed markdown docs by key",
+    )(resource_repo_markdown)
     mcp.add_resource(FunctionResource(
         uri="nbdev://roadmap", name="roadmap",
         description="Pointer to roadmap.ipynb if it exists",

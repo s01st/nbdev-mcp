@@ -104,6 +104,8 @@ This MCP guides LLMs to follow this philosophy by providing tools to:
 - Repo-level `.md` files can be added to `nbs/index.ipynb` as markdown
   cells (use
   [`split_markdown_cells`](https://s01st.github.io/nbdev-mcp/11_tools/editing.html#split_markdown_cells)).
+- Use `nbdev://repo-markdown` to enumerate repo/agent markdown docs and
+  `nbdev://repo-markdown/{doc_key}` to read one safely.
 
 ## Integrations
 
