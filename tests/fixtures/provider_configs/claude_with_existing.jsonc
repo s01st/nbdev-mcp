@@ -1,0 +1,12 @@
+{
+  // Existing Claude MCP setup
+  "mcpServers": {
+    "other": {
+      "command": "python",
+      "args": ["-m", "other_server"]
+    }
+  },
+  "ui": {
+    "theme": "light"
+  }
+}

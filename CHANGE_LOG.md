@@ -11,6 +11,7 @@ New features
 - New `mcp_compatibility_matrix` tool for provider/client readiness across Codex, Claude, VS Code, and Cursor.
 - New `mcp_contract_ci_gate` tool for CI-friendly contract compatibility enforcement.
 - New `mcp_policy_pack` tool that bundles auth/visibility, contract drift, provider drift, and documentation hygiene controls.
+- Added fixture-driven provider lifecycle tests for Claude, Cursor, VS Code, and Codex config mutation paths.
 
 ## 2026-02-06 (Unreleased)
 

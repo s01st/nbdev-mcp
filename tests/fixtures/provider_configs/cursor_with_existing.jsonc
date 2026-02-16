@@ -1,0 +1,13 @@
+{
+  // Existing Cursor MCP setup
+  "servers": {
+    "other": {
+      "type": "stdio",
+      "command": "python",
+      "args": ["-m", "other_server"]
+    }
+  },
+  "editor": {
+    "fontSize": 14
+  }
+}

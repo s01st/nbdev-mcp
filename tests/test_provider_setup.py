@@ -7,6 +7,13 @@ from pathlib import Path
 
 import nbdev_mcp.mcp as mcp
 
+providerFixturesDir = Path(__file__).parent / "fixtures" / "provider_configs"
+
+
+def loadProviderFixture(name: str) -> str:
+    """Load provider config fixture text by filename."""
+    return (providerFixturesDir / name).read_text(encoding="utf-8")
+
 
 def patch_provider_paths(monkeypatch, provider: mcp.Provider, config_path: Path, settings_path: Path | None = None) -> None:
     """Patch provider path resolution to use temp files."""
@@ -161,3 +168,103 @@ args = []
     assert '[mcp_servers.nbdev]' not in after
     assert '[mcp_servers.other]' in after
 
+
+def test_claude_install_status_uninstall_with_jsonc_fixture(monkeypatch, tmp_path):
+    """Claude JSONC config should preserve existing entries through lifecycle actions."""
+    config_path = tmp_path / "claude.json"
+    patch_provider_paths(monkeypatch, mcp.Provider.claude, config_path)
+
+    config_path.write_text(loadProviderFixture("claude_with_existing.jsonc"), encoding="utf-8")
+
+    installed = mcp.install_to_provider(
+        mcp.Provider.claude,
+        dry_run=False,
+        auto_start=False,
+        backup=True,
+    )
+    assert installed is True
+
+    data = json.loads(config_path.read_text(encoding="utf-8"))
+    assert "mcpServers" in data
+    assert "other" in data["mcpServers"]
+    assert "nbdev" in data["mcpServers"]
+    assert "type" not in data["mcpServers"]["nbdev"]
+
+    status = mcp.check_provider_status(mcp.Provider.claude)
+    assert status["installed"] is True
+    assert status["format"] == "json"
+    assert status["exists"] is True
+
+    backups = list(tmp_path.glob("claude.json.*.bak"))
+    assert backups, "expected backup file to be created"
+
+    removed = mcp.uninstall_from_provider(mcp.Provider.claude, dry_run=False, backup=False)
+    assert removed is True
+    after = json.loads(config_path.read_text(encoding="utf-8"))
+    assert "nbdev" not in after["mcpServers"]
+    assert "other" in after["mcpServers"]
+
+
+def test_cursor_update_sets_autostart_and_status(monkeypatch, tmp_path):
+    """Cursor update should write stdio server entry and enable autostart settings."""
+    config_path = tmp_path / "mcp.json"
+    settings_path = tmp_path / "settings.json"
+    patch_provider_paths(monkeypatch, mcp.Provider.cursor, config_path, settings_path=settings_path)
+
+    config_path.write_text(loadProviderFixture("cursor_with_existing.jsonc"), encoding="utf-8")
+
+    updated = mcp.update_provider_config(
+        mcp.Provider.cursor,
+        strategy="merge",
+        dry_run=False,
+        auto_start=True,
+        backup=False,
+    )
+    assert updated is True
+
+    data = json.loads(config_path.read_text(encoding="utf-8"))
+    assert "servers" in data
+    assert "other" in data["servers"]
+    assert "nbdev" in data["servers"]
+    assert data["servers"]["nbdev"]["type"] == "stdio"
+    assert data["servers"]["nbdev"]["autoStart"] is True
+
+    settings = json.loads(settings_path.read_text(encoding="utf-8"))
+    assert settings["chat.mcp.autostart"] is True
+
+    status = mcp.check_provider_status(mcp.Provider.cursor)
+    assert status["installed"] is True
+    assert status["autostart"] is True
+
+
+def test_codex_invalid_toml_fails_without_write(monkeypatch, tmp_path):
+    """Invalid TOML should fail safely without mutating provider config."""
+    config_path = tmp_path / "config.toml"
+    patch_provider_paths(monkeypatch, mcp.Provider.codex, config_path)
+
+    malformed = loadProviderFixture("codex_invalid.toml")
+    config_path.write_text(malformed, encoding="utf-8")
+
+    ok = mcp.update_provider_config(
+        mcp.Provider.codex,
+        strategy="merge",
+        dry_run=False,
+        auto_start=False,
+        backup=True,
+    )
+    assert ok is False
+    assert config_path.read_text(encoding="utf-8") == malformed
+    assert not list(tmp_path.glob("config.toml.*.bak"))
+
+
+def test_claude_status_reports_parse_error(monkeypatch, tmp_path):
+    """Status should flag parse errors and avoid false positive installs."""
+    config_path = tmp_path / "claude.json"
+    patch_provider_paths(monkeypatch, mcp.Provider.claude, config_path)
+
+    config_path.write_text('{"mcpServers": {"x": [}\n', encoding="utf-8")
+    status = mcp.check_provider_status(mcp.Provider.claude)
+
+    assert status["exists"] is True
+    assert status["installed"] is False
+    assert status["error"] == "parse error"
