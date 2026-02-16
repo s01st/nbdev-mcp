@@ -11,7 +11,7 @@ from mcp.server.fastmcp import FastMCP  # official MCP Python SDK (FastMCP 2.0+)
 from mcp.server.fastmcp.resources import FunctionResource
 
 from .utils.config import load_bookmarks
-from .utils.paths import (
+from nbdev_mcp.utils.paths import (
     require_project,
     project_summary,
     nbs_dir,
@@ -20,6 +20,7 @@ from .utils.paths import (
     nbdev_settings_path,
     nbdev_generation,
 )
+
 
 # %% auto 0
 __all__ = ['resource_project_summary', 'resource_projects', 'resource_tree', 'resource_settings', 'resource_env_file',
@@ -70,6 +71,7 @@ def resource_tree() -> str:
                 files.append(str(q.relative_to(p)))
             except Exception:
                 files.append(str(q))
+
     settings_file = nbdev_settings_path(p)
     payload = {
         'root': str(p),
@@ -355,5 +357,7 @@ def add_resources(mcp: FastMCP) -> None:
         fn=resource_heartbeat
     ))
 
+
 # %% ../nbs/10_resources.ipynb 19
 #| export
+

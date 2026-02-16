@@ -13,12 +13,13 @@ from mcp.server.fastmcp import FastMCP
 from mcp.server.fastmcp.prompts import Prompt
 
 from .utils.config import CURRENT_PROJECT, get_config
-from .utils.paths import (
+from nbdev_mcp.utils.paths import (
     settings_dict,
     nbdev_generation,
     nbdev_settings_path,
     nbdev_command_name,
 )
+
 
 # %% auto 0
 __all__ = ['get_python_3_9_plus_package_file', 'get_python_3_8_minus_package_file', 'get_bundled_template',
@@ -105,12 +106,15 @@ def prompt_context() -> Dict[str, Any]:
         s = settings_dict(project)
         ctx["lib"] = s.get("lib_name") or ctx["lib"]
         ctx["nbs_path"] = s.get("nbs_path") or ctx["nbs_path"]
+
         settings_file = nbdev_settings_path(project)
         if settings_file is not None:
             ctx["nbdev_settings_file"] = settings_file.name
+
         generation = nbdev_generation(project)
         if generation != "unknown":
             ctx["nbdev_generation"] = generation
+
         ctx["nbdev_prepare_cmd"] = nbdev_command_name(project, "prepare")
         ctx["nbdev_export_cmd"] = nbdev_command_name(project, "export")
         ctx["nbdev_test_cmd"] = nbdev_command_name(project, "test")
@@ -148,6 +152,7 @@ def render_prompt(name: str, **kwargs: Any) -> str:
     except (KeyError, ValueError, AttributeError):
         # Template has complex formatting or code blocks with braces - return as-is
         return raw
+
 
 # %% ../nbs/20_prompts.ipynb 9
 def nbdev_workflow_philosophy() -> str:

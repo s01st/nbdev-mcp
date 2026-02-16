@@ -25,6 +25,7 @@ from nbdev_mcp.utils.paths import (
 )
 from ..utils.rich import render_result, render_table
 
+
 # %% auto 0
 __all__ = ['TOOL_ANNOTATIONS', 'set_project', 'current_project', 'console_scripts_status', 'find_projects', 'bookmark_project',
            'list_bookmarks', 'remove_bookmark', 'config_status', 'prompt_templates_status', 'health_check',
@@ -82,7 +83,7 @@ def console_scripts_status(project: Optional[str] = None) -> Dict[str, Any]:
         p = resolve_selector(project)
     except Exception as e:
         return {'ok': False, 'error': str(e)}
-    
+
     settings = settings_dict(p)
     settings_file = nbdev_settings_path(p)
     settings_name = settings_file.name if settings_file is not None else 'settings.ini'
@@ -108,6 +109,7 @@ def console_scripts_status(project: Optional[str] = None) -> Dict[str, Any]:
         'message': msg,
         'pretty': pretty,
     }
+
 
 # %% ../../nbs/11_tools/01_project.ipynb 10
 def find_projects(
@@ -529,7 +531,7 @@ def analyze_remote(
                 'url': url,
                 'branch': branch
             }
-        
+
         # Check if it's an nbdev project
         if not is_nbdev_project(clone_path):
             return {
@@ -545,7 +547,7 @@ def analyze_remote(
         # Find notebooks
         nbs_path = settings.get('nbs_path', 'nbs')
         nbs_dir = clone_path / nbs_path
-        
+
         notebooks = []
         if nbs_dir.exists():
             notebooks = sorted([
@@ -553,11 +555,11 @@ def analyze_remote(
                 for nb in nbs_dir.rglob('*.ipynb')
                 if not nb.name.startswith('.')
             ])
-        
+
         # Find lib path
         lib_path = settings.get('lib_path', settings.get('lib_name', ''))
         lib_dir = clone_path / lib_path if lib_path else clone_path
-        
+
         modules = []
         if lib_dir.exists():
             modules = sorted([
@@ -565,7 +567,7 @@ def analyze_remote(
                 for m in lib_dir.rglob('*.py')
                 if not m.name.startswith('.')
             ])
-        
+
         requirements_raw = settings.get('requirements', '')
 
         # Build analysis
@@ -614,6 +616,7 @@ def analyze_remote(
             shutil.rmtree(temp_dir)
         except Exception:
             pass
+
 
 # %% ../../nbs/11_tools/01_project.ipynb 23
 import time

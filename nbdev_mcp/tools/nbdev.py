@@ -9,7 +9,7 @@ from typing import Any, Dict, List, Optional
 from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 
-from ..utils.paths import (
+from nbdev_mcp.utils.paths import (
     project_summary,
     resolve_selector,
     nbdev_command_name,
@@ -90,6 +90,7 @@ def nbdev_prepare(
         'pretty': pretty,
     }
 
+
 # %% ../../nbs/11_tools/03_nbdev.ipynb 7
 def nbdev_export(
     project: Optional[str] = None,
@@ -167,6 +168,7 @@ def nbdev_export(
         'nbdev_command_candidates': candidates,
         'pretty': pretty,
     }
+
 
 # %% ../../nbs/11_tools/03_nbdev.ipynb 8
 def nbdev_test(
@@ -260,6 +262,7 @@ def nbdev_test(
         'nbdev_command_candidates': candidates,
         'pretty': pretty,
     }
+
 
 # %% ../../nbs/11_tools/03_nbdev.ipynb 9
 def pytest_run(
