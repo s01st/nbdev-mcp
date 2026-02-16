@@ -123,8 +123,14 @@ Use the built-in installer (recommended):
 
 ``` sh
 python -m nbdev_mcp install vscode --auto-start
+python -m nbdev_mcp update vscode --strategy merge --dry-run
 python -m nbdev_mcp status
 ```
+
+Notes:
+
+- VS Code MCP config is `mcp.json` with server key `servers`.
+- `--auto-start` also enables `chat.mcp.autostart` in `settings.json`.
 
 Manual path reference:
 
@@ -155,6 +161,31 @@ Then in `mcp.json`:
     }
 }
 ```
+
+### Cursor
+
+#### Config File
+
+Use the built-in installer (recommended):
+
+``` sh
+python -m nbdev_mcp install cursor --auto-start
+python -m nbdev_mcp update cursor --strategy merge --dry-run
+python -m nbdev_mcp status
+```
+
+Notes:
+
+- Cursor MCP config is `mcp.json` with server key `servers`.
+- `--auto-start` also enables `chat.mcp.autostart` in `settings.json`.
+
+Manual path reference (macOS):
+
+``` sh
+~/Library/Application Support/Cursor/User/
+```
+
+The MCP config file is `mcp.json`.
 
 ### Claude Code
 
@@ -256,16 +287,16 @@ codex mcp add mcp-nbdev \
 If you are new to using `nbdev` here are some useful pointers to get you
 started.
 
-### Install nbmcp in Development mode
+### Install nbdev_mcp in Development Mode
 
 ``` sh
-# make sure nbmcp package is installed in development mode
+# make sure nbdev_mcp is installed in development mode
 $ pip install -e .
 
 # make changes under nbs/ directory
 # ...
 
-# compile to have changes apply to nbmcp
+# compile so changes apply to nbdev_mcp
 # nbdev v2:
 $ nbdev_prepare
 # nbdev v3:
@@ -277,19 +308,19 @@ $ nbdev-prepare
 ### Installation
 
 Install latest from the GitHub
-[repository](https://github.com/s01st/nbmcp):
+[repository](https://github.com/s01st/nbdev_mcp):
 
 ``` sh
 $ pip install git+https://github.com/s01st/nbdev_mcp.git
 ```
 
-or from [conda](https://anaconda.org/s01st/nbmcp)
+or from [conda](https://anaconda.org/s01st/nbdev_mcp)
 
 ``` sh
 $ conda install -c s01st nbdev_mcp
 ```
 
-or from [pypi](https://pypi.org/project/nbmcp/)
+or from [pypi](https://pypi.org/project/nbdev_mcp/)
 
 ``` sh
 $ pip install nbdev_mcp
@@ -297,12 +328,11 @@ $ pip install nbdev_mcp
 
 ### Documentation
 
-Documentation can be found hosted on this GitHub
-[repository](https://github.com/s01st/nbmcp)’s
-[pages](https://s01st.github.io/nbmcp/). Additionally you can find
-package manager specific guidelines on
-[conda](https://anaconda.org/s01st/nbmcp) and
-[pypi](https://pypi.org/project/nbmcp/) respectively.
+Documentation is hosted on [GitHub
+Pages](https://s01st.github.io/nbdev_mcp/). Repository and package info
+is available on [GitHub](https://github.com/s01st/nbdev_mcp),
+[PyPI](https://pypi.org/project/nbdev_mcp/), and
+[Anaconda](https://anaconda.org/s01st/nbdev_mcp).
 
 ## How to use
 

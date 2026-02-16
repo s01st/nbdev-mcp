@@ -13,6 +13,7 @@ New features
 - New `mcp_policy_pack` tool that bundles auth/visibility, contract drift, provider drift, and documentation hygiene controls.
 - Added fixture-driven provider lifecycle tests for Claude, Cursor, VS Code, and Codex config mutation paths.
 - Updated integration docs in `nbs/index.ipynb` for VS Code update workflow and Cursor installer support.
+- Removed duplicate README link-reference definitions and aligned developer-guide naming to `nbdev_mcp`.
 
 ## 2026-02-06 (Unreleased)
 
