@@ -13,6 +13,7 @@ from nbdev_mcp.tools.project import (
     remove_bookmark,
     config_status,
     prompt_templates_status,
+    mcp_scaffold_guide,
 )
 
 
@@ -268,3 +269,22 @@ class TestPromptTemplatesStatus:
         result = prompt_templates_status()
         assert 'pretty' in result
         assert 'Template' in result['pretty']
+
+
+class TestMcpScaffoldGuide:
+    """Tests for mcp_scaffold_guide tool."""
+
+    def test_mcp_scaffold_guide_returns_expected_sections(self):
+        """Guide should include notebooks, symbols, and checklist."""
+        result = mcp_scaffold_guide()
+        assert result["ok"] is True
+        assert result["server_name"] == "mcp.custom"
+        assert isinstance(result["notebooks"], list)
+        assert isinstance(result["exported_symbols"], list)
+        assert isinstance(result["checklist"], list)
+
+    def test_mcp_scaffold_guide_respects_arguments(self):
+        """Guide should reflect server_name/module_prefix arguments."""
+        result = mcp_scaffold_guide(server_name="mcp.demo", module_prefix="70_demo")
+        assert result["server_name"] == "mcp.demo"
+        assert all(path.startswith("nbs/70_demo/") for path in result["notebooks"])

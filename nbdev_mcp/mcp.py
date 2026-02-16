@@ -21,7 +21,17 @@ from mcp.server.fastmcp import FastMCP
 from . import __version__
 from .utils.logs import log
 from .utils.config import CURRENT_PROJECT
-from .utils.paths import resolve_selector
+from nbdev_mcp.utils.paths import (
+    resolve_selector,
+    get_vscode_mcp_path,
+    get_vscode_settings_path as get_vscode_settings_path_from_utils,
+    get_cursor_mcp_path,
+    get_cursor_settings_path as get_cursor_settings_path_from_utils,
+    get_provider_config_paths,
+    select_provider_config_path,
+    get_claude_config_path as get_claude_code_config_path,
+    get_codex_config_path as get_codex_toml_config_path,
+)
 from .utils.subprocess import watch_notebooks
 from .resources import add_resources
 from nbdev_mcp.tools import (
@@ -35,14 +45,18 @@ from .tests.agent_e2e import add_recording_tools, enable_auto_recording
 
 console = Console();  # semicolon suppresses notebook output
 
+
 # %% auto 0
 __all__ = ['console', 'app', 'set_http_path_if_supported', 'create_nbdev_mcp', 'Transport', 'Provider', 'version_callback',
            'callback', 'get_claude_config_path', 'get_vscode_config_path', 'get_vscode_settings_path',
-           'get_cursor_config_path', 'get_cursor_settings_path', 'get_codex_config_path', 'get_config_path',
-           'get_mcp_key', 'get_python_path', 'make_server_config', 'make_server_config_for_provider',
-           'get_wrapper_script_path', 'generate_wrapper_script', 'install_wrapper_script',
-           'enable_mcp_autostart_in_settings', 'install_to_provider', 'uninstall_from_provider',
-           'check_provider_status', 'run', 'install', 'uninstall', 'status', 'test', 'main']
+           'get_cursor_config_path', 'get_cursor_settings_path', 'get_codex_config_path', 'get_config_paths',
+           'get_config_path', 'get_config_format', 'get_mcp_key', 'get_python_path', 'make_server_config',
+           'make_server_config_for_provider', 'get_wrapper_script_path', 'generate_wrapper_script',
+           'install_wrapper_script', 'parse_jsonc', 'parse_toml', 'render_diff', 'make_backup', 'write_text_config',
+           'reconcile_server_config', 'toml_value', 'render_codex_toml_block', 'upsert_toml_table', 'remove_toml_table',
+           'enable_mcp_autostart_in_settings', 'update_provider_config', 'install_to_provider',
+           'uninstall_from_provider', 'check_provider_status', 'run', 'install', 'update', 'uninstall', 'status',
+           'test', 'main']
 
 # %% ../nbs/30_mcp.ipynb 6
 def set_http_path_if_supported(target_path: str) -> bool:
@@ -159,85 +173,64 @@ def callback(
 
 # %% ../nbs/30_mcp.ipynb 16
 def get_claude_config_path() -> Path:
-    """Get Claude Desktop config path."""
-    if sys.platform == "darwin":
-        return Path.home() / "Library/Application Support/Claude/claude_desktop_config.json"
-    elif sys.platform == "win32":
-        return Path(os.environ.get("APPDATA", "")) / "Claude/claude_desktop_config.json"
-    else:
-        return Path.home() / ".config/Claude/claude_desktop_config.json"
+    """Get active Claude config path (Code or Desktop)."""
+    selected = select_provider_config_path("claude")
+    return selected if selected is not None else get_claude_code_config_path()
 
 
 def get_vscode_config_path() -> Path:
-    """Get VS Code MCP config path (mcp.json, not settings.json)."""
-    if sys.platform == "darwin":
-        return Path.home() / "Library/Application Support/Code/User/mcp.json"
-    elif sys.platform == "win32":
-        return Path(os.environ.get("APPDATA", "")) / "Code/User/mcp.json"
-    else:
-        return Path.home() / ".config/Code/User/mcp.json"
+    """Get VS Code MCP config path (mcp.json)."""
+    return get_vscode_mcp_path()
 
 
 def get_vscode_settings_path() -> Path:
     """Get VS Code settings.json path."""
-    if sys.platform == "darwin":
-        return Path.home() / "Library/Application Support/Code/User/settings.json"
-    elif sys.platform == "win32":
-        return Path(os.environ.get("APPDATA", "")) / "Code/User/settings.json"
-    else:
-        return Path.home() / ".config/Code/User/settings.json"
+    return get_vscode_settings_path_from_utils()
 
 
 def get_cursor_config_path() -> Path:
-    """Get Cursor MCP config path."""
-    if sys.platform == "darwin":
-        return Path.home() / "Library/Application Support/Cursor/User/mcp.json"
-    elif sys.platform == "win32":
-        return Path(os.environ.get("APPDATA", "")) / "Cursor/User/mcp.json"
-    else:
-        return Path.home() / ".config/Cursor/User/mcp.json"
+    """Get Cursor MCP config path (mcp.json)."""
+    return get_cursor_mcp_path()
 
 
 def get_cursor_settings_path() -> Path:
     """Get Cursor settings.json path."""
-    if sys.platform == "darwin":
-        return Path.home() / "Library/Application Support/Cursor/User/settings.json"
-    elif sys.platform == "win32":
-        return Path(os.environ.get("APPDATA", "")) / "Cursor/User/settings.json"
-    else:
-        return Path.home() / ".config/Cursor/User/settings.json"
+    return get_cursor_settings_path_from_utils()
 
 
 def get_codex_config_path() -> Path:
-    """Get Codex CLI config path."""
-    if sys.platform == "darwin":
-        return Path.home() / ".codex/config.json"
-    elif sys.platform == "win32":
-        return Path(os.environ.get("USERPROFILE", "")) / ".codex/config.json"
-    else:
-        return Path.home() / ".codex/config.json"
+    """Get active Codex config path (prefers TOML, supports legacy JSON)."""
+    selected = select_provider_config_path("codex")
+    return selected if selected is not None else get_codex_toml_config_path()
+
+
+def get_config_paths(provider: Provider) -> List[Path]:
+    """Get candidate config paths for a provider in priority order."""
+    return get_provider_config_paths(provider.value)
 
 
 def get_config_path(provider: Provider) -> Path:
-    """Get config path for a provider."""
-    match provider:
-        case Provider.claude:
-            return get_claude_config_path()
-        case Provider.vscode:
-            return get_vscode_config_path()
-        case Provider.cursor:
-            return get_cursor_config_path()
-        case Provider.codex:
-            return get_codex_config_path()
+    """Get selected config path for a provider."""
+    selected = select_provider_config_path(provider.value)
+    if selected is None:
+        raise ValueError(f"Unsupported provider: {provider.value}")
+    return selected
 
 
-def get_mcp_key(provider: Provider) -> str:
-    """Get the MCP servers key for a provider's config."""
+def get_config_format(config_path: Path) -> str:
+    """Get config format from file extension."""
+    return "toml" if config_path.suffix.lower() == ".toml" else "json"
+
+
+def get_mcp_key(provider: Provider, config_format: Optional[str] = None) -> str:
+    """Get the MCP servers key for a provider config."""
+    if config_format == "toml":
+        return "mcp_servers"
     match provider:
         case Provider.claude | Provider.codex:
             return "mcpServers"
         case Provider.vscode | Provider.cursor:
-            return "servers"  # mcp.json uses "servers" not "mcpServers"
+            return "servers"
 
 
 def get_python_path() -> str:
@@ -249,7 +242,7 @@ def make_server_config() -> dict:
     """Generate server configuration dict."""
     return {
         "command": get_python_path(),
-        "args": ["-u", "-m", "nbdev_mcp"]
+        "args": ["-u", "-m", "nbdev_mcp"],
     }
 
 
@@ -257,7 +250,7 @@ def make_server_config_for_provider(provider: Provider, auto_start: bool = False
     """Generate server configuration dict for a specific provider."""
     base = {
         "command": get_python_path(),
-        "args": ["-u", "-m", "nbdev_mcp"]
+        "args": ["-u", "-m", "nbdev_mcp"],
     }
     # VS Code/Cursor mcp.json format includes "type" and optional "autoStart"
     if provider in (Provider.vscode, Provider.cursor):
@@ -287,8 +280,7 @@ echo MCP exited with code %ERRORLEVEL%, restarting in 2 seconds...
 timeout /t 2 /nobreak >nul
 goto loop
 '''
-    else:
-        return f'''#!/usr/bin/env bash
+    return f'''#!/usr/bin/env bash
 # nbdev-mcp keep-alive wrapper
 # Monitors and restarts the MCP server if it exits
 
@@ -325,163 +317,395 @@ def install_wrapper_script(dry_run: bool = False) -> Path:
     return script_path
 
 
-def _parse_jsonc(text: str) -> dict:
-    """Parse JSON with Comments (JSONC) - strips // and /* */ comments."""
+def parse_jsonc(text: str) -> dict:
+    """Parse JSON with comments and trailing commas support."""
     import re
-    # Try standard JSON first
+
     try:
         return json.loads(text)
     except json.JSONDecodeError:
         pass
-    # Strip JSONC comments and trailing commas
-    text = re.sub(r'//[^\n]*', '', text)  # single-line comments
-    text = re.sub(r'/\*.*?\*/', '', text, flags=re.DOTALL)  # multi-line comments
-    text = re.sub(r',(\s*[}\]])', r'\1', text)  # trailing commas
+
+    normalized = re.sub(r'//[^\n]*', '', text)
+    normalized = re.sub(r'/\*.*?\*/', '', normalized, flags=re.DOTALL)
+    normalized = re.sub(r',(\s*[}\]])', r'\1', normalized)
+
     try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        return {}
+        return json.loads(normalized)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"Invalid JSON/JSONC: {exc}") from exc
+
+
+def parse_toml(text: str) -> dict:
+    """Parse TOML and raise ValueError on failure."""
+    import tomllib
+
+    try:
+        return tomllib.loads(text)
+    except Exception as exc:
+        raise ValueError(f"Invalid TOML: {exc}") from exc
+
+
+def render_diff(before: str, after: str, path: Path) -> str:
+    """Render unified diff between two text blobs."""
+    from difflib import unified_diff
+
+    before_lines = before.splitlines(keepends=True)
+    after_lines = after.splitlines(keepends=True)
+    diff_lines = list(unified_diff(before_lines, after_lines, fromfile=f"{path} (before)", tofile=f"{path} (after)"))
+    return "".join(diff_lines)
+
+
+def make_backup(path: Path) -> Optional[Path]:
+    """Create timestamped backup for an existing config file."""
+    if not path.exists():
+        return None
+    from datetime import datetime
+
+    stamp = datetime.now().strftime("%Y%m%d%H%M%S")
+    backup_path = path.with_name(f"{path.name}.{stamp}.bak")
+    backup_path.write_text(path.read_text())
+    return backup_path
+
+
+def write_text_config(path: Path, content: str, backup: bool = True) -> Optional[Path]:
+    """Write config text with optional backup of existing file."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    backup_path = make_backup(path) if backup else None
+    path.write_text(content)
+    return backup_path
+
+
+def reconcile_server_config(
+    provider: Provider,
+    current_server: Optional[dict],
+    strategy: str,
+    auto_start: bool,
+) -> dict:
+    """Reconcile current and desired server configs."""
+    desired = make_server_config_for_provider(provider, auto_start=auto_start)
+    if strategy == "replace":
+        return desired
+
+    merged = dict(current_server or {})
+    merged.update(desired)
+    if provider in (Provider.vscode, Provider.cursor) and auto_start:
+        merged["autoStart"] = True
+    return merged
+
+
+def toml_value(value: Any) -> str:
+    """Render a Python value as TOML literal."""
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (int, float)):
+        return str(value)
+    if isinstance(value, str):
+        return json.dumps(value)
+    if isinstance(value, list):
+        inner = ", ".join(toml_value(item) for item in value)
+        return f"[{inner}]"
+    if isinstance(value, dict):
+        parts = [f"{key} = {toml_value(val)}" for key, val in value.items()]
+        return "{ " + ", ".join(parts) + " }"
+    return json.dumps(str(value))
+
+
+def render_codex_toml_block(server_config: dict) -> str:
+    """Render the [mcp_servers.nbdev] table for Codex TOML config."""
+    ordered_keys: List[str] = []
+    for key in ["command", "args", "env", "cwd"]:
+        if key in server_config:
+            ordered_keys.append(key)
+    for key in sorted(server_config.keys()):
+        if key not in ordered_keys:
+            ordered_keys.append(key)
+
+    lines = ["[mcp_servers.nbdev]"]
+    for key in ordered_keys:
+        lines.append(f"{key} = {toml_value(server_config[key])}")
+    return "\n".join(lines) + "\n"
+
+
+def upsert_toml_table(text: str, table_name: str, table_block: str) -> tuple[str, bool]:
+    """Insert or replace a TOML table block by table name."""
+    import re
+
+    normalized = text if text.endswith("\n") or text == "" else text + "\n"
+    pattern = re.compile(rf"(?ms)^\[{re.escape(table_name)}\]\n(?:.*\n)*?(?=^\[|\Z)")
+    replacement = table_block if table_block.endswith("\n") else table_block + "\n"
+
+    if pattern.search(normalized):
+        return pattern.sub(replacement, normalized, count=1), True
+
+    joiner = "\n" if normalized.strip() else ""
+    return normalized + joiner + replacement, False
+
+
+def remove_toml_table(text: str, table_name: str) -> tuple[str, bool]:
+    """Remove a TOML table block by table name."""
+    import re
+
+    normalized = text if text.endswith("\n") or text == "" else text + "\n"
+    pattern = re.compile(rf"(?ms)^\[{re.escape(table_name)}\]\n(?:.*\n)*?(?=^\[|\Z)")
+    new_text = pattern.sub("", normalized, count=1)
+    changed = new_text != normalized
+
+    while "\n\n\n" in new_text:
+        new_text = new_text.replace("\n\n\n", "\n\n")
+    if new_text and not new_text.endswith("\n"):
+        new_text += "\n"
+    return new_text, changed
 
 
 def enable_mcp_autostart_in_settings(provider: Provider, dry_run: bool = False) -> bool:
-    """Enable chat.mcp.autostart in VS Code/Cursor settings.json.
-    
-    VS Code requires this setting for MCP servers to auto-start.
-    """
+    """Enable chat.mcp.autostart in VS Code/Cursor settings.json."""
     if provider == Provider.vscode:
         settings_path = get_vscode_settings_path()
     elif provider == Provider.cursor:
         settings_path = get_cursor_settings_path()
     else:
-        return False  # Only VS Code/Cursor need this
-    
-    # Read existing settings
+        return False
+
     if settings_path.exists():
-        settings = _parse_jsonc(settings_path.read_text())
+        try:
+            settings = parse_jsonc(settings_path.read_text())
+        except ValueError as exc:
+            console.print(f"[red]✗[/] {provider.value}: {exc}")
+            return False
     else:
         settings = {}
-    
-    # Check if already enabled
+
     if settings.get("chat.mcp.autostart") is True:
-        console.print(f"[dim]  chat.mcp.autostart already enabled[/]")
+        console.print("[dim]  chat.mcp.autostart already enabled[/]")
         return True
-    
-    # Enable autostart
+
     settings["chat.mcp.autostart"] = True
-    
+    after_text = json.dumps(settings, indent=2) + "\n"
+
     if dry_run:
-        console.print(f"\n[bold cyan]{provider.value.title()} Settings[/]")
+        console.print(f"\n[bold cyan]{provider.value.title()} settings[/]")
         console.print(f"[dim]File:[/] {settings_path}")
-        console.print(f"[dim]Action:[/] Set chat.mcp.autostart = true")
+        console.print("[dim]Action:[/] Set chat.mcp.autostart = true")
         return True
-    
+
     settings_path.parent.mkdir(parents=True, exist_ok=True)
-    settings_path.write_text(json.dumps(settings, indent=2))
+    settings_path.write_text(after_text)
     console.print(f"[green]✓[/] Enabled chat.mcp.autostart in {settings_path}")
     return True
 
 
-def install_to_provider(provider: Provider, dry_run: bool = False, auto_start: bool = False) -> bool:
-    """Install nbdev-mcp to a provider's config."""
+def update_provider_config(
+    provider: Provider,
+    dry_run: bool = False,
+    auto_start: bool = False,
+    strategy: str = "merge",
+    backup: bool = True,
+) -> bool:
+    """Install/update nbdev-mcp entry for a provider using reconcile strategy."""
+    strategy_value = strategy.lower().strip()
+    if strategy_value not in {"merge", "replace"}:
+        console.print(f"[red]✗[/] {provider.value}: invalid strategy '{strategy}' (use merge or replace)")
+        return False
+
+    config_paths = get_config_paths(provider)
     config_path = get_config_path(provider)
-    server_config = make_server_config_for_provider(provider, auto_start=auto_start)
-    mcp_key = get_mcp_key(provider)
-    
-    # Read existing or create new
-    if config_path.exists():
-        config = _parse_jsonc(config_path.read_text())
-        existed = True
-    else:
-        config = {}
-        existed = False
-    
-    # Build the change
-    if mcp_key not in config:
-        config[mcp_key] = {}
-    config[mcp_key]["nbdev"] = server_config
-    
+    config_format = get_config_format(config_path)
+    mcp_key = get_mcp_key(provider, config_format=config_format)
+
+    before_text = config_path.read_text() if config_path.exists() else ""
+    existed = config_path.exists()
+
+    try:
+        if config_format == "toml":
+            current_server: Optional[dict] = None
+            if existed:
+                parsed = parse_toml(before_text)
+                current_server = parsed.get("mcp_servers", {}).get("nbdev")
+
+            server_config = reconcile_server_config(provider, current_server, strategy_value, auto_start)
+            block = render_codex_toml_block(server_config)
+            after_text, replaced = upsert_toml_table(before_text, "mcp_servers.nbdev", block)
+            action = "Update existing config" if replaced else ("Update existing config" if existed else "Create new config file")
+        else:
+            if existed:
+                config = parse_jsonc(before_text)
+            else:
+                config = {}
+
+            if mcp_key not in config or not isinstance(config[mcp_key], dict):
+                config[mcp_key] = {}
+
+            current_server = config[mcp_key].get("nbdev") if isinstance(config[mcp_key], dict) else None
+            config[mcp_key]["nbdev"] = reconcile_server_config(provider, current_server, strategy_value, auto_start)
+            after_text = json.dumps(config, indent=2) + "\n"
+            action = "Update existing config" if existed else "Create new config file"
+    except ValueError as exc:
+        console.print(f"[red]✗[/] {provider.value}: {exc}")
+        console.print("[dim]No config changes were written.[/]")
+        return False
+
+    diff = render_diff(before_text, after_text, config_path)
+
     if dry_run:
         console.print(f"\n[bold cyan]{provider.value.title()}[/]")
         console.print(f"[dim]File:[/] {config_path}")
-        if existed:
-            console.print(f"[dim]Action:[/] Update existing config")
+        console.print(f"[dim]Format:[/] {config_format}")
+        console.print(f"[dim]Candidates:[/] {', '.join(str(p) for p in config_paths)}")
+        console.print(f"[dim]Action:[/] {action}")
+        console.print(f"[dim]Strategy:[/] {strategy_value}")
+        if diff:
+            console.print("\n[dim]Unified diff:[/]")
+            console.print(diff)
         else:
-            console.print(f"[dim]Action:[/] Create new config file")
-        console.print(f"\n[dim]Full config that would be written:[/]")
-        console.print_json(json.dumps(config, indent=2))
+            console.print("\n[dim]No changes (already up to date).[/]")
     else:
-        config_path.parent.mkdir(parents=True, exist_ok=True)
-        config_path.write_text(json.dumps(config, indent=2))
-        console.print(f"[green]✓[/] Installed to [bold]{provider.value}[/]: {config_path}")
-    
-    # Also enable autostart in settings.json for VS Code/Cursor
+        if before_text == after_text:
+            console.print(f"[green]✓[/] {provider.value}: already up to date ({config_path})")
+        else:
+            backup_path = write_text_config(config_path, after_text, backup=backup)
+            console.print(f"[green]✓[/] Updated [bold]{provider.value}[/]: {config_path}")
+            if backup_path is not None:
+                console.print(f"[dim]Backup:[/] {backup_path}")
+
     if auto_start and provider in (Provider.vscode, Provider.cursor):
         enable_mcp_autostart_in_settings(provider, dry_run=dry_run)
-    
+
     return True
 
 
-def uninstall_from_provider(provider: Provider, dry_run: bool = False) -> bool:
-    """Remove nbdev-mcp from a provider's config."""
+def install_to_provider(
+    provider: Provider,
+    dry_run: bool = False,
+    auto_start: bool = False,
+    backup: bool = True,
+) -> bool:
+    """Install nbdev-mcp to a provider config."""
+    return update_provider_config(
+        provider,
+        dry_run=dry_run,
+        auto_start=auto_start,
+        strategy="replace",
+        backup=backup,
+    )
+
+
+def uninstall_from_provider(provider: Provider, dry_run: bool = False, backup: bool = True) -> bool:
+    """Remove nbdev-mcp from a provider config."""
+    config_paths = get_config_paths(provider)
     config_path = get_config_path(provider)
-    mcp_key = get_mcp_key(provider)
-    
+    config_format = get_config_format(config_path)
+    mcp_key = get_mcp_key(provider, config_format=config_format)
+
     if not config_path.exists():
         console.print(f"[yellow]⚠[/] {provider.value}: Config not found")
         return False
-    
-    config = _parse_jsonc(config_path.read_text())
-    
-    if mcp_key not in config or "nbdev" not in config.get(mcp_key, {}):
-        console.print(f"[yellow]⚠[/] {provider.value}: nbdev-mcp not installed")
+
+    before_text = config_path.read_text()
+
+    try:
+        if config_format == "toml":
+            parse_toml(before_text)
+            after_text, changed = remove_toml_table(before_text, "mcp_servers.nbdev")
+            if not changed:
+                console.print(f"[yellow]⚠[/] {provider.value}: nbdev-mcp not installed")
+                return False
+        else:
+            config = parse_jsonc(before_text)
+            if mcp_key not in config or "nbdev" not in config.get(mcp_key, {}):
+                console.print(f"[yellow]⚠[/] {provider.value}: nbdev-mcp not installed")
+                return False
+            del config[mcp_key]["nbdev"]
+            after_text = json.dumps(config, indent=2) + "\n"
+    except ValueError as exc:
+        console.print(f"[red]✗[/] {provider.value}: {exc}")
+        console.print("[dim]No config changes were written.[/]")
         return False
-    
-    # Remove the entry
-    del config[mcp_key]["nbdev"]
-    
+
+    diff = render_diff(before_text, after_text, config_path)
+
     if dry_run:
         console.print(f"\n[bold cyan]{provider.value.title()}[/]")
         console.print(f"[dim]File:[/] {config_path}")
+        console.print(f"[dim]Format:[/] {config_format}")
+        console.print(f"[dim]Candidates:[/] {', '.join(str(p) for p in config_paths)}")
         console.print(f"[dim]Action:[/] Remove nbdev from {mcp_key}")
-        console.print(f"\n[dim]Config after removal:[/]")
-        console.print_json(json.dumps(config, indent=2))
+        if diff:
+            console.print("\n[dim]Unified diff:[/]")
+            console.print(diff)
+        else:
+            console.print("\n[dim]No changes.[/]")
         return True
-    
-    config_path.write_text(json.dumps(config, indent=2))
+
+    if before_text == after_text:
+        console.print(f"[green]✓[/] {provider.value}: already removed")
+        return True
+
+    backup_path = write_text_config(config_path, after_text, backup=backup)
     console.print(f"[green]✓[/] Removed from [bold]{provider.value}[/]")
+    if backup_path is not None:
+        console.print(f"[dim]Backup:[/] {backup_path}")
     return True
 
 
 def check_provider_status(provider: Provider) -> dict:
     """Check installation status for a provider."""
+    config_paths = get_config_paths(provider)
     config_path = get_config_path(provider)
-    mcp_key = get_mcp_key(provider)
-    
-    if not config_path.exists():
-        return {"provider": provider.value, "installed": False, "exists": False, "path": str(config_path)}
-    
+    config_format = get_config_format(config_path)
+    mcp_key = get_mcp_key(provider, config_format=config_format)
+
+    exists = config_path.exists()
+    if not exists:
+        return {
+            "provider": provider.value,
+            "installed": False,
+            "exists": False,
+            "path": str(config_path),
+            "format": config_format,
+            "candidates": [str(p) for p in config_paths],
+        }
+
     try:
-        config = _parse_jsonc(config_path.read_text())
-    except Exception:
-        return {"provider": provider.value, "installed": False, "exists": True, "path": str(config_path), "error": "parse error"}
-    
-    installed = mcp_key in config and "nbdev" in config.get(mcp_key, {})
-    
-    # Check autostart setting for VS Code/Cursor
+        if config_format == "toml":
+            config = parse_toml(config_path.read_text())
+            installed = isinstance(config.get("mcp_servers", {}).get("nbdev"), dict)
+        else:
+            config = parse_jsonc(config_path.read_text())
+            installed = mcp_key in config and "nbdev" in config.get(mcp_key, {})
+    except ValueError:
+        return {
+            "provider": provider.value,
+            "installed": False,
+            "exists": True,
+            "path": str(config_path),
+            "format": config_format,
+            "candidates": [str(p) for p in config_paths],
+            "error": "parse error",
+        }
+
     autostart_enabled = None
     if provider in (Provider.vscode, Provider.cursor):
         settings_path = get_vscode_settings_path() if provider == Provider.vscode else get_cursor_settings_path()
         if settings_path.exists():
             try:
-                settings = _parse_jsonc(settings_path.read_text())
+                settings = parse_jsonc(settings_path.read_text())
                 autostart_enabled = settings.get("chat.mcp.autostart", False)
-            except Exception:
+            except ValueError:
                 pass
-    
-    result = {"provider": provider.value, "installed": installed, "exists": True, "path": str(config_path)}
+
+    result = {
+        "provider": provider.value,
+        "installed": installed,
+        "exists": True,
+        "path": str(config_path),
+        "format": config_format,
+        "candidates": [str(p) for p in config_paths],
+    }
     if autostart_enabled is not None:
         result["autostart"] = autostart_enabled
     return result
+
 
 # %% ../nbs/30_mcp.ipynb 17
 def _run_server(
@@ -618,18 +842,63 @@ def install(
     wrapper: Annotated[bool, typer.Option(
         "-w", "--wrapper", help="Install keep-alive wrapper script."
     )] = False,
+    backup: Annotated[bool, typer.Option(
+        "--backup/--no-backup", help="Backup config files before writing."
+    )] = True,
 ):
     """Install nbdev-mcp to MCP client(s)."""
     providers = [provider] if provider else list(Provider)
+    ok = True
 
     for p in providers:
-        install_to_provider(p, dry_run=dry_run, auto_start=auto_start)
+        ok = install_to_provider(p, dry_run=dry_run, auto_start=auto_start, backup=backup) and ok
 
     if wrapper:
         install_wrapper_script(dry_run=dry_run)
 
     if not dry_run:
         console.print("\n[yellow]Restart your MCP client(s) to activate.[/]")
+
+    if not ok:
+        raise typer.Exit(1)
+
+
+@app.command()
+def update(
+    provider: Annotated[Optional[Provider], typer.Argument(
+        help="Provider: claude, vscode, cursor, codex. Omit for all."
+    )] = None,
+    dry_run: Annotated[bool, typer.Option(
+        "-d", "--dry-run", help="Show exact config changes without writing."
+    )] = False,
+    auto_start: Annotated[bool, typer.Option(
+        "-a", "--auto-start", help="Auto-start server when VS Code/Cursor opens."
+    )] = False,
+    strategy: Annotated[str, typer.Option(
+        "-s", "--strategy", help="Reconcile strategy: merge or replace."
+    )] = "merge",
+    backup: Annotated[bool, typer.Option(
+        "--backup/--no-backup", help="Backup config files before writing."
+    )] = True,
+):
+    """Reconcile existing provider config with nbdev-mcp server config."""
+    providers = [provider] if provider else list(Provider)
+    ok = True
+
+    for p in providers:
+        ok = update_provider_config(
+            p,
+            dry_run=dry_run,
+            auto_start=auto_start,
+            strategy=strategy,
+            backup=backup,
+        ) and ok
+
+    if not dry_run:
+        console.print("\n[yellow]Restart your MCP client(s) to apply updates.[/]")
+
+    if not ok:
+        raise typer.Exit(1)
 
 
 @app.command()
@@ -640,12 +909,19 @@ def uninstall(
     dry_run: Annotated[bool, typer.Option(
         "-d", "--dry-run", help="Show exact config changes without writing."
     )] = False,
+    backup: Annotated[bool, typer.Option(
+        "--backup/--no-backup", help="Backup config files before writing."
+    )] = True,
 ):
     """Remove nbdev-mcp from MCP client(s)."""
     providers = [provider] if provider else list(Provider)
-    
+    ok = True
+
     for p in providers:
-        uninstall_from_provider(p, dry_run=dry_run)
+        ok = uninstall_from_provider(p, dry_run=dry_run, backup=backup) and ok
+
+    if not ok:
+        raise typer.Exit(1)
 
 
 @app.command()
@@ -654,31 +930,36 @@ def status():
     table = Table(title="nbdev-mcp Status", show_header=True)
     table.add_column("Provider", style="cyan")
     table.add_column("Status")
+    table.add_column("Format")
     table.add_column("Auto-Start")
     table.add_column("Path", style="dim")
-    
+
     for provider in Provider:
         info = check_provider_status(provider)
         if not info["exists"]:
             st = "[dim]Config not found[/]"
+            fmt = info.get("format", "")
             autostart = ""
         elif info["installed"]:
             st = "[green]✓ Installed[/]"
-            # Show autostart status for VS Code/Cursor
+            fmt = info.get("format", "")
             if "autostart" in info:
                 autostart = "[green]✓[/]" if info["autostart"] else "[yellow]✗[/]"
             else:
                 autostart = "[dim]n/a[/]"
         else:
             st = "[yellow]Not configured[/]"
+            fmt = info.get("format", "")
             autostart = ""
-        table.add_row(provider.value.title(), st, autostart, info["path"])
-    
-    table.add_row("", "", "", "")
-    table.add_row("Python", f"[green]v{sys.version.split()[0]}[/]", "", get_python_path())
-    table.add_row("nbdev-mcp", f"[blue]v{__version__}[/]", "", "")
-    
+
+        table.add_row(provider.value.title(), st, fmt, autostart, info["path"])
+
+    table.add_row("", "", "", "", "")
+    table.add_row("Python", f"[green]v{sys.version.split()[0]}[/]", "", "", get_python_path())
+    table.add_row("nbdev-mcp", f"[blue]v{__version__}[/]", "", "", "")
+
     console.print(table)
+
 
 # %% ../nbs/30_mcp.ipynb 19
 @app.command()

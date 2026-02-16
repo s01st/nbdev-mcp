@@ -29,7 +29,7 @@ from ..utils.rich import render_result, render_table
 # %% auto 0
 __all__ = ['TOOL_ANNOTATIONS', 'set_project', 'current_project', 'console_scripts_status', 'find_projects', 'bookmark_project',
            'list_bookmarks', 'remove_bookmark', 'config_status', 'prompt_templates_status', 'health_check',
-           'add_project_tools', 'analyze_remote', 'server_metrics']
+           'mcp_scaffold_guide', 'add_project_tools', 'analyze_remote', 'server_metrics']
 
 # %% ../../nbs/11_tools/01_project.ipynb 6
 def set_project(selector: str) -> Dict[str, Any]:
@@ -369,7 +369,54 @@ def health_check() -> Dict[str, Any]:
     pretty = render_result('Health Check', health)
     return {'ok': health['status'] != 'error', **health, 'pretty': pretty}
 
-# %% ../../nbs/11_tools/01_project.ipynb 19
+# %% ../../nbs/11_tools/01_project.ipynb 18
+def mcp_scaffold_guide(
+    server_name: str = "mcp.custom",
+    module_prefix: str = "50_mcp",
+) -> Dict[str, Any]:
+    """Tool: Return a notebook-first scaffold guide for building a new MCP server.
+
+    The guide follows this project's conventions:
+    - All scripting logic lives under ``nbs/``
+    - Exported APIs are surfaced via nbdev settings
+    - Generated ``.py`` modules are treated as build artifacts
+    """
+    notebooks = [
+        f"nbs/{module_prefix}/00__init__.ipynb",
+        f"nbs/{module_prefix}/01_server.ipynb",
+        f"nbs/{module_prefix}/02_tools.ipynb",
+        f"nbs/{module_prefix}/03_prompts.ipynb",
+        f"nbs/{module_prefix}/04_cli.ipynb",
+    ]
+
+    exported_symbols = [
+        "create_server",
+        "add_tools",
+        "add_prompts",
+        "main",
+    ]
+
+    checklist = [
+        "Create notebooks under nbs/ with one responsibility per notebook.",
+        "Set #| default_exp and #| export cells for public API.",
+        "Wire resources/tools/prompts in a create_server(...) composition root.",
+        "Add console_scripts entry in settings.ini for the new CLI entrypoint.",
+        "Run nbdev_export after notebook edits.",
+        "Add tests for tool registration and config mutation behavior.",
+    ]
+
+    result = {
+        "ok": True,
+        "server_name": server_name,
+        "notebooks": notebooks,
+        "exported_symbols": exported_symbols,
+        "checklist": checklist,
+    }
+    pretty = render_result("MCP Scaffold Guide", result)
+    return {**result, "pretty": pretty}
+
+
+# %% ../../nbs/11_tools/01_project.ipynb 20
 # Tool annotation definitions for project tools
 TOOL_ANNOTATIONS = {
     'set_project': ToolAnnotations(
@@ -444,11 +491,17 @@ TOOL_ANNOTATIONS = {
         idempotentHint=True,
         openWorldHint=True
     ),
+    'mcp_scaffold_guide': ToolAnnotations(
+        title="MCP Scaffold Guide",
+        readOnlyHint=True,
+        idempotentHint=True,
+        openWorldHint=False
+    ),
 }
 
 def add_project_tools(mcp: FastMCP) -> None:
     """Attach project management tools to the MCP server with annotations.
-    
+
     Args:
         mcp: FastMCP server instance.
     """
@@ -465,13 +518,15 @@ def add_project_tools(mcp: FastMCP) -> None:
         ('health_check', health_check),
         ('server_metrics', server_metrics),
         ('analyze_remote', analyze_remote),
+        ('mcp_scaffold_guide', mcp_scaffold_guide),
     ]
-    
+
     for name, func in tools:
         annotations = TOOL_ANNOTATIONS.get(name)
         mcp.tool(name=name, annotations=annotations)(func)
 
-# %% ../../nbs/11_tools/01_project.ipynb 22
+
+# %% ../../nbs/11_tools/01_project.ipynb 23
 import tempfile
 import shutil
 
@@ -618,7 +673,7 @@ def analyze_remote(
             pass
 
 
-# %% ../../nbs/11_tools/01_project.ipynb 23
+# %% ../../nbs/11_tools/01_project.ipynb 24
 import time
 
 # Module-level tracking for server metrics

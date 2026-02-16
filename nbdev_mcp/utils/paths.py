@@ -41,7 +41,9 @@ __all__ = ['notebook_cache', 'NOTEBOOK_CACHE_TTL', 'expand', 'settings_dict', 'n
            'load_modidx', 'symbol_locations', 'with_project', 'get_vscode_user_dir', 'get_vscode_mcp_path',
            'get_vscode_settings_path', 'get_claude_config_dir', 'get_claude_config_path', 'get_claude_mcp_path',
            'get_codex_config_dir', 'get_codex_config_path', 'get_ollama_config_dir', 'get_ollama_config_path',
-           'get_project_mcp_path', 'get_project_claude_path', 'get_all_config_paths', 'get_mcp_config_path']
+           'get_project_mcp_path', 'get_project_claude_path', 'get_all_config_paths', 'get_mcp_config_path',
+           'get_cursor_user_dir', 'get_cursor_mcp_path', 'get_cursor_settings_path', 'get_claude_desktop_config_path',
+           'get_codex_json_config_path', 'get_provider_config_paths', 'select_provider_config_path']
 
 # %% ../../nbs/00_utils/08_paths.ipynb 6
 def expand(p: str) -> Path:
@@ -1051,33 +1053,100 @@ def get_project_claude_path(project_dir: Optional[Path] = None) -> Path:
 
 # %% ../../nbs/00_utils/08_paths.ipynb 60
 def get_all_config_paths() -> Dict[str, Path]:
-    """Get all known MCP configuration paths.
-    
+    """Get preferred MCP configuration paths for supported providers.
+
     Returns
     -------
     dict[str, Path]
-        Mapping of provider name to config path.
+        Mapping of provider name to selected config path.
     """
-    return {
-        'vscode': get_vscode_mcp_path(),
-        'claude': get_claude_config_path(),
-        'codex': get_codex_config_path(),
-        'ollama': get_ollama_config_path(),
-    }
+    providers = ['vscode', 'cursor', 'claude', 'codex', 'ollama']
+    paths: Dict[str, Path] = {}
+    for provider in providers:
+        selected = select_provider_config_path(provider)
+        if selected is not None:
+            paths[provider] = selected
+    return paths
+
 
 # %% ../../nbs/00_utils/08_paths.ipynb 61
 def get_mcp_config_path(provider: str) -> Optional[Path]:
-    """Get config path for a specific MCP provider.
-    
+    """Get the preferred config path for a specific MCP provider.
+
     Parameters
     ----------
     provider : str
-        Provider name (vscode, claude, codex, ollama).
-    
+        Provider name (vscode, cursor, claude, codex, ollama).
+
     Returns
     -------
     Optional[Path]
-        Config path or None if unknown provider.
+        Selected config path or None if unknown provider.
     """
-    paths = get_all_config_paths()
-    return paths.get(provider.lower())
+    return select_provider_config_path(provider)
+
+
+# %% ../../nbs/00_utils/08_paths.ipynb 62
+def get_cursor_user_dir() -> Path:
+    """Get Cursor user settings directory."""
+    system = platform.system().lower()
+    if system == 'darwin':
+        return Path.home() / 'Library' / 'Application Support' / 'Cursor' / 'User'
+    elif system == 'windows':
+        return Path(os.environ.get('APPDATA', '')) / 'Cursor' / 'User'
+    return Path.home() / '.config' / 'Cursor' / 'User'
+
+
+def get_cursor_mcp_path() -> Path:
+    """Get Cursor MCP configuration path."""
+    return get_cursor_user_dir() / 'mcp.json'
+
+
+def get_cursor_settings_path() -> Path:
+    """Get Cursor settings.json path."""
+    return get_cursor_user_dir() / 'settings.json'
+
+
+def get_claude_desktop_config_path() -> Path:
+    """Get Claude Desktop config path."""
+    system = platform.system().lower()
+    if system == 'darwin':
+        return Path.home() / 'Library' / 'Application Support' / 'Claude' / 'claude_desktop_config.json'
+    elif system == 'windows':
+        return Path(os.environ.get('APPDATA', '')) / 'Claude' / 'claude_desktop_config.json'
+    return Path.home() / '.config' / 'Claude' / 'claude_desktop_config.json'
+
+
+def get_codex_json_config_path() -> Path:
+    """Get legacy Codex JSON config path (~/.codex/config.json)."""
+    return get_codex_config_dir() / 'config.json'
+
+
+def get_provider_config_paths(provider: str) -> List[Path]:
+    """Get all supported config file paths for a provider in priority order."""
+    name = provider.lower()
+    if name == 'vscode':
+        return [get_vscode_mcp_path()]
+    if name == 'cursor':
+        return [get_cursor_mcp_path()]
+    if name == 'claude':
+        return [get_claude_config_path(), get_claude_desktop_config_path()]
+    if name == 'codex':
+        return [get_codex_config_path(), get_codex_json_config_path()]
+    if name == 'ollama':
+        return [get_ollama_config_path()]
+    return []
+
+
+def select_provider_config_path(provider: str) -> Optional[Path]:
+    """Select the active config path for a provider.
+
+    Prefers the first existing file from provider candidates; otherwise
+    falls back to the first candidate path.
+    """
+    candidates = get_provider_config_paths(provider)
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return candidates[0] if candidates else None
+

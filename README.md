@@ -11,11 +11,11 @@
 - Multi-project support: bookmarks (alias -\> path), discovery via
   `NBDEV_PROJECTS` or common roots.
 
-- **Core nbdev tools**:
-  [`nbdev_prepare`](https://s01st.github.io/nbdev-mcp/11_tools/nbdev.html#nbdev_prepare),
+- **Core nbdev tools**: version-aware command handling for v2
+  ([`nbdev_prepare`](https://s01st.github.io/nbdev-mcp/11_tools/nbdev.html#nbdev_prepare),
   [`nbdev_export`](https://s01st.github.io/nbdev-mcp/11_tools/nbdev.html#nbdev_export),
-  [`nbdev_test`](https://s01st.github.io/nbdev-mcp/11_tools/nbdev.html#nbdev_test),
-  `pytest`,
+  [`nbdev_test`](https://s01st.github.io/nbdev-mcp/11_tools/nbdev.html#nbdev_test))
+  and v3 (`nbdev-prepare`, `nbdev-export`, `nbdev-test`), plus `pytest`,
   [`ensure_env`](https://s01st.github.io/nbdev-mcp/11_tools/env.html#ensure_env),
   [`export_env`](https://s01st.github.io/nbdev-mcp/11_tools/env.html#export_env)
   (mamba/conda).
@@ -53,7 +53,8 @@
   [`reuse_first_checklist`](https://s01st.github.io/nbdev-mcp/prompts.html#reuse_first_checklist))
   that instruct LLMs to use nbdev properly.
 
-- **Resources**: project summary, tree, settings.ini, env file, roadmap,
+- **Resources**: project summary, tree, detected nbdev settings file
+  (`settings.ini`/`settings.toml`/`pyproject.toml`), env file, roadmap,
   learning links (safe, read-only).
 
 - **Transports**: stdio (for desktop clients), streamable-http (built-in
@@ -75,9 +76,9 @@ This MCP guides LLMs to follow this philosophy by providing tools to:
     ([`find_source_notebook`](https://s01st.github.io/nbdev-mcp/11_tools/editing.html#find_source_notebook))
 3.  Edit notebooks instead of `.py` files
     ([`edit_notebook_cell`](https://s01st.github.io/nbdev-mcp/11_tools/editing.html#edit_notebook_cell))
-4.  Always run
-    [`nbdev_export`](https://s01st.github.io/nbdev-mcp/11_tools/nbdev.html#nbdev_export)
-    after editing
+4.  Always run the project-appropriate export command after editing
+    ([`nbdev_export`](https://s01st.github.io/nbdev-mcp/11_tools/nbdev.html#nbdev_export)
+    for v2 or `nbdev-export` for v3)
 5.  Search for existing symbols before adding new code
     ([`find_symbol`](https://s01st.github.io/nbdev-mcp/11_tools/analysis.html#find_symbol))
 6.  Analyze dependencies and avoid duplication
@@ -86,6 +87,23 @@ This MCP guides LLMs to follow this philosophy by providing tools to:
 7.  Lint for best practices
     ([`lint_rules`](https://s01st.github.io/nbdev-mcp/11_tools/lint.html#lint_rules),
     [`validate_inits`](https://s01st.github.io/nbdev-mcp/11_tools/lint.html#validate_inits))
+
+### Conventions
+
+- `nbs/index.ipynb` becomes README.md and does not need `default_exp`.
+- Avoid private names (leading underscore) for functions/classes/vars;
+  dunder methods like `__init__` are OK.
+- Dead-code reports are signals: some exports are used in
+  tutorials/docs, but unused exports can indicate duplication (e.g., A
+  vs A2).
+- Keep living docs current: `ROADMAP.md`, `TODOs.md`, `*_PLAN.md`, and
+  agent docs under `.claude/` or `.codex/`.
+- All scripting/CLI logic must live in `nbs/` and be exposed via
+  detected nbdev settings (`settings.ini`, `settings.toml`, or
+  `pyproject.toml` `[tool.nbdev]`).
+- Repo-level `.md` files can be added to `nbs/index.ipynb` as markdown
+  cells (use
+  [`split_markdown_cells`](https://s01st.github.io/nbdev-mcp/11_tools/editing.html#split_markdown_cells)).
 
 ## Integrations
 
@@ -101,45 +119,38 @@ You are looking for `'MCP: Add Server...'`
 
 #### Config File
 
-First you need to find where your Visual Studio Code application support
-is installed.
-
-For example, if you are on macOS this might be
+Use the built-in installer (recommended):
 
 ``` sh
-~/Library/Application Support/Code/
+python -m nbdev_mcp install vscode --auto-start
+python -m nbdev_mcp status
 ```
 
-What you are looking for is a `mcp.json` file. This might already exist
-if you’ve installed MCPs from VSCode Extensions.
+Manual path reference:
 
-If not you can create the `mcp.json` configuration file scoped for the
-user in the directory:
+For macOS, VS Code user config is typically under:
+
+``` sh
+~/Library/Application Support/Code/User/
+```
+
+The MCP config file is `mcp.json`.
 
 ``` sh
 $ touch ~/Library/Application Support/Code/User/mcp.json
 ```
 
-Then in `mcp.json`
+Then in `mcp.json`:
 
 ``` json
 # ~/Library/Application Support/Code/User/mcp.json
 {
     "servers": {
         // ... other servers
-        "nbdev-mcp": {
+        "nbdev": {
             "type": "stdio",
-            "command": "mamba",
-            "args": [
-                "run",
-                "-n",
-                "core",  // if you want to point to a specific mamba / conda environment
-                "python",
-                "-m",
-                "nbdev_mcp",
-                "--transport",
-                "stdio" // "streamable-http"
-            ]
+            "command": "python",
+            "args": ["-u", "-m", "nbdev_mcp"]
         }
     }
 }
@@ -149,79 +160,95 @@ Then in `mcp.json`
 
 #### Config File
 
-Inside `~/.claude.json`
+Use the built-in installer (recommended):
+
+``` sh
+python -m nbdev_mcp install claude
+python -m nbdev_mcp update claude --strategy merge --dry-run
+python -m nbdev_mcp status
+```
+
+Supported Claude config variants:
+
+1.  Claude Code: `~/.claude.json`
+2.  Claude Desktop:
+    - macOS:
+      `~/Library/Application Support/Claude/claude_desktop_config.json`
+    - Linux: `~/.config/Claude/claude_desktop_config.json`
+    - Windows: `%APPDATA%/Claude/claude_desktop_config.json`
+
+Example (`~/.claude.json`):
 
 ``` json
 {
-    // ... add globally
-    "mcpServers": { 
-        "prompt_toolkit": {
-          "type": "stdio",
-          "command": "/Path/to/mamba/envs/env_name/bin/python",
-          "args": [
-            "-m",
-            "nbdev_mcp",
-            "--transport",
-            "stdio"
-          ],
-          "env": {}
-        }
-      },
-    
-    // alternatively under a specific project
-    "projects": {
-      "Path/to/project": { // added automatically by claude
-        // ...
-        "mcpServers": { 
-          // same as above
-        }
-        // ...
-      }
+  "mcpServers": {
+    "nbdev": {
+      "command": "/Path/to/python",
+      "args": ["-u", "-m", "nbdev_mcp"]
     }
+  }
 }
 ```
 
 #### Command Line
 
 ``` sh
-PYTHON="python3" # PYTHON="~/{mamba|conda|micromamba}/envs/{env_name}/bin/python"
+PYTHON="python3" # or /Path/to/{mamba|conda|micromamba}/envs/{env_name}/bin/python
 
-MCP_SCRIPT="~/MCPs/nbdev_mcp" # path to script
-
-# Remove existing configuration if present
 claude mcp remove nbdev 2>/dev/null || true
-
-# Add the MCP server - using user scope so it's available everywhere
 claude mcp add --scope user --transport stdio nbdev -- \
-    "$PYTHON" -m "$MCP_SCRIPT" --transport stdio
+    "$PYTHON" -u -m nbdev_mcp
 ```
 
 ### Codex
 
 #### Config File
 
-Under you codex config, e.g. `~/.codex/config.toml`
+Use the built-in installer (recommended):
 
-``` ini
+``` sh
+python -m nbdev_mcp install codex
+python -m nbdev_mcp update codex --strategy merge --dry-run
+python -m nbdev_mcp status
+```
+
+Codex config variants supported by the installer:
+
+1.  Preferred: `~/.codex/config.toml`
+2.  Legacy: `~/.codex/config.json`
+
+TOML example:
+
+``` toml
 # https://developers.openai.com/codex/local-config/
-
-# Default model to use
 model = "gpt-5.1-codex-max"
-model_provider = "openai"   # or e.g., "ollama" etc
+model_provider = "openai"
 
-# ...
-[mcp_servers.mcp-nbdev]
-command = "/Path/to/{mamba|conda|micromamba}/envs/{env_name}/bin/python"
-args = ["-m", "nbdev_mcp", "--transport", "stdio"]
+[mcp_servers.nbdev]
+command = "/Path/to/python"
+args = ["-u", "-m", "nbdev_mcp"]
+```
+
+Legacy JSON example:
+
+``` json
+{
+  "mcpServers": {
+    "nbdev": {
+      "command": "/Path/to/python",
+      "args": ["-u", "-m", "nbdev_mcp"]
+    }
+  }
+}
 ```
 
 #### Command Line
 
 ``` sh
-codex mcp add mcp-nbdev \ 
+codex mcp add mcp-nbdev \
     --env NBDEV_PROJECTS="~/dev:~/Projects" \
     /Path/to/{mamba|conda|micromamba}/envs/{env_name}/bin/python \
-    -m nbdev_mcp --transport stdio
+    -u -m nbdev_mcp
 ```
 
 ## Developer Guide
@@ -239,7 +266,10 @@ $ pip install -e .
 # ...
 
 # compile to have changes apply to nbmcp
+# nbdev v2:
 $ nbdev_prepare
+# nbdev v3:
+$ nbdev-prepare
 ```
 
 ## Usage

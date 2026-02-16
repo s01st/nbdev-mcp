@@ -20,6 +20,8 @@ from nbdev_mcp.utils.paths import (
     read_nb,
     write_nb,
     resolve_relative,
+    get_provider_config_paths,
+    select_provider_config_path,
 )
 from nbdev_mcp.utils.nb import join_source, find_default_exp
 
@@ -250,3 +252,47 @@ class TestResolveRelative:
         """Test absolute import passthrough."""
         result = resolve_relative("pkg.mod", "other.module")
         assert result == "other.module"
+
+
+class TestProviderConfigPaths:
+    """Test provider config path helpers."""
+
+    def test_get_provider_config_paths_known_provider(self):
+        """Known providers should return at least one candidate path."""
+        assert len(get_provider_config_paths("vscode")) >= 1
+        assert len(get_provider_config_paths("claude")) >= 1
+        assert len(get_provider_config_paths("codex")) >= 1
+
+    def test_get_provider_config_paths_unknown_provider(self):
+        """Unknown provider should return an empty list."""
+        assert get_provider_config_paths("does-not-exist") == []
+
+    def test_select_provider_prefers_existing_path(self, monkeypatch, tmp_path):
+        """Selection should pick first existing candidate path."""
+        import nbdev_mcp.utils.paths as paths_module
+
+        missing = tmp_path / "missing.json"
+        existing = tmp_path / "existing.json"
+        existing.write_text("{}", encoding="utf-8")
+
+        monkeypatch.setattr(
+            paths_module,
+            "get_provider_config_paths",
+            lambda _provider: [missing, existing],
+        )
+        selected = select_provider_config_path("vscode")
+        assert selected == existing
+
+    def test_select_provider_falls_back_to_first_candidate(self, monkeypatch, tmp_path):
+        """Selection should return first candidate when none exist."""
+        import nbdev_mcp.utils.paths as paths_module
+
+        first = tmp_path / "first.json"
+        second = tmp_path / "second.json"
+        monkeypatch.setattr(
+            paths_module,
+            "get_provider_config_paths",
+            lambda _provider: [first, second],
+        )
+        selected = select_provider_config_path("vscode")
+        assert selected == first
