@@ -19,6 +19,9 @@ from nbdev_mcp.tools.project import (
     mcp_contract_diff,
     mcp_provider_drift_report,
     mcp_composition_workbench,
+    mcp_compatibility_matrix,
+    mcp_contract_ci_gate,
+    mcp_policy_pack,
 )
 
 
@@ -368,3 +371,121 @@ class TestMcpOpsTools:
         assert isinstance(result["architecture"], list)
         assert isinstance(result["recommendations"], list)
         assert len(result["recommendations"]) > 0
+
+
+class TestMcpGovernanceTools:
+    """Tests for MCP governance and compatibility tools."""
+
+    def test_mcp_compatibility_matrix_ready_provider(self, monkeypatch):
+        """Compatibility matrix should classify ready providers correctly."""
+        monkeypatch.setattr(
+            "nbdev_mcp.tools.project.mcp_provider_drift_report",
+            lambda provider=None: {
+                "ok": True,
+                "drifted_count": 0,
+                "providers": [
+                    {
+                        "provider": "codex",
+                        "exists": True,
+                        "installed": True,
+                        "drifted": False,
+                        "format": "toml",
+                        "path": "/tmp/config.toml",
+                    }
+                ],
+            },
+        )
+        monkeypatch.setattr("nbdev_mcp.tools.project.resolve_selector", lambda value=None: Path("/tmp/project"))
+        monkeypatch.setattr("nbdev_mcp.tools.project.nbdev_generation", lambda path: "v3")
+
+        result = mcp_compatibility_matrix(project="/tmp/project")
+
+        assert result["ok"] is True
+        assert result["ready_count"] == 1
+        assert result["matrix"][0]["readiness"] == "ready"
+        assert result["nbdev_generation"] == "v3"
+
+    def test_mcp_contract_ci_gate_allows_additive_changes(self, monkeypatch):
+        """CI gate should pass when only additive changes are present and allowed."""
+        monkeypatch.setattr(
+            "nbdev_mcp.tools.project.mcp_contract_diff",
+            lambda baseline_path, current_path=None, server_name="mcp.nbdev": {
+                "ok": True,
+                "breaking": False,
+                "added_tools": ["new_tool"],
+                "removed_tools": [],
+                "changed_tool_schemas": [],
+                "added_resources": [],
+                "removed_resources": [],
+                "added_prompts": [],
+                "removed_prompts": [],
+                "baseline_hash": "abc",
+                "current_hash": "def",
+            },
+        )
+
+        result = mcp_contract_ci_gate(baseline_path="contracts/baseline.json")
+
+        assert result["ok"] is True
+        assert result["passed"] is True
+        assert result["exit_code"] == 0
+        assert result["violations"] == []
+        assert len(result["notices"]) == 1
+
+    def test_mcp_contract_ci_gate_blocks_schema_changes(self, monkeypatch):
+        """CI gate should fail on schema changes."""
+        monkeypatch.setattr(
+            "nbdev_mcp.tools.project.mcp_contract_diff",
+            lambda baseline_path, current_path=None, server_name="mcp.nbdev": {
+                "ok": True,
+                "breaking": True,
+                "added_tools": [],
+                "removed_tools": [],
+                "changed_tool_schemas": ["set_project"],
+                "added_resources": [],
+                "removed_resources": [],
+                "added_prompts": [],
+                "removed_prompts": [],
+                "baseline_hash": "abc",
+                "current_hash": "def",
+            },
+        )
+
+        result = mcp_contract_ci_gate(baseline_path="contracts/baseline.json")
+
+        assert result["ok"] is True
+        assert result["passed"] is False
+        assert result["exit_code"] == 1
+        assert any("schema changes" in item for item in result["violations"])
+
+    def test_mcp_policy_pack_strict_fails_on_provider_drift(self, monkeypatch):
+        """Strict policy should fail when provider drift is detected."""
+        monkeypatch.setattr(
+            "nbdev_mcp.tools.project.mcp_contract_ci_gate",
+            lambda baseline_path, current_path=None, server_name="mcp.nbdev", allow_additive_tools=True, allow_additive_resources=True, allow_additive_prompts=True: {
+                "ok": True,
+                "passed": True,
+                "exit_code": 0,
+                "violations": [],
+            },
+        )
+        monkeypatch.setattr(
+            "nbdev_mcp.tools.project.mcp_provider_drift_report",
+            lambda provider=None: {
+                "ok": True,
+                "drifted_count": 1,
+                "providers": [{"provider": "codex", "drifted": True}],
+            },
+        )
+
+        result = mcp_policy_pack(profile="strict", baseline_path="contracts/baseline.json")
+
+        assert result["ok"] is True
+        assert result["passed"] is False
+        assert any("Provider drift detected" in item for item in result["violations"])
+
+    def test_mcp_policy_pack_rejects_unknown_profile(self):
+        """Unknown profile names should return a validation error."""
+        result = mcp_policy_pack(profile="unknown")
+        assert result["ok"] is False
+        assert "Unknown profile" in result["error"]

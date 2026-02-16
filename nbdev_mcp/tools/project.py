@@ -36,7 +36,8 @@ __all__ = ['TOOL_ANNOTATIONS', 'set_project', 'current_project', 'console_script
            'build_mcp_scaffold_plan', 'mcp_scaffold_guide', 'scaffold_mcp_notebooks', 'normalize_json_value',
            'schema_hash', 'collect_contract_async', 'mcp_contract_snapshot', 'mcp_contract_diff',
            'provider_entry_matches_expected', 'mcp_provider_drift_report', 'mcp_composition_workbench',
-           'add_project_tools', 'analyze_remote', 'server_metrics']
+           'mcp_compatibility_matrix', 'mcp_contract_ci_gate', 'mcp_policy_pack', 'add_project_tools', 'analyze_remote',
+           'server_metrics']
 
 # %% ../../nbs/11_tools/01_project.ipynb 6
 def set_project(selector: str) -> Dict[str, Any]:
@@ -965,6 +966,437 @@ def mcp_composition_workbench(
 
 
 # %% ../../nbs/11_tools/01_project.ipynb 20
+def mcp_compatibility_matrix(
+    project: Optional[str] = None,
+    provider: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Tool: Summarize provider/client compatibility and readiness."""
+    if provider is not None:
+        provider = provider.strip().lower()
+
+    drift_report = mcp_provider_drift_report(provider=provider)
+    if not drift_report.get('ok'):
+        return drift_report
+
+    provider_profiles: Dict[str, Dict[str, Any]] = {
+        'codex': {
+            'client': 'Codex',
+            'preferred_config': 'toml',
+            'auto_start_supported': False,
+            'notes': 'Prefer TOML config; legacy JSON fallback is supported.',
+        },
+        'claude': {
+            'client': 'Claude Code/Desktop',
+            'preferred_config': 'json',
+            'auto_start_supported': False,
+            'notes': 'JSON config with a stdio command is the stable path.',
+        },
+        'vscode': {
+            'client': 'VS Code',
+            'preferred_config': 'json',
+            'auto_start_supported': True,
+            'notes': 'Supports chat.mcp.autostart in settings.json.',
+        },
+        'cursor': {
+            'client': 'Cursor',
+            'preferred_config': 'json',
+            'auto_start_supported': True,
+            'notes': 'Supports chat.mcp.autostart in settings.json.',
+        },
+    }
+
+    generation = 'unknown'
+    if project is not None:
+        try:
+            generation = nbdev_generation(resolve_selector(project))
+        except Exception as e:
+            return {'ok': False, 'error': str(e)}
+    else:
+        try:
+            generation = nbdev_generation(resolve_selector(None))
+        except Exception:
+            generation = 'unknown'
+
+    matrix: List[Dict[str, Any]] = []
+    recommendations: List[str] = []
+
+    for report in drift_report.get('providers', []):
+        provider_name = report.get('provider', '')
+        profile_data = provider_profiles.get(provider_name, {
+            'client': provider_name,
+            'preferred_config': report.get('format', 'json'),
+            'auto_start_supported': False,
+            'notes': '',
+        })
+
+        if not report.get('exists', False):
+            readiness = 'missing_config'
+            action = f"python -m nbdev_mcp install {provider_name}"
+        elif not report.get('installed', False):
+            readiness = 'not_installed'
+            action = f"python -m nbdev_mcp install {provider_name}"
+        elif report.get('drifted', False):
+            readiness = 'drifted'
+            action = report.get('suggestion', f"python -m nbdev_mcp update {provider_name} --strategy merge --dry-run")
+        else:
+            readiness = 'ready'
+            action = 'No action required.'
+
+        row = {
+            'provider': provider_name,
+            'client': profile_data['client'],
+            'readiness': readiness,
+            'installed': report.get('installed', False),
+            'drifted': report.get('drifted', False),
+            'config_format': report.get('format', 'json'),
+            'preferred_config': profile_data['preferred_config'],
+            'auto_start_supported': profile_data['auto_start_supported'],
+            'notes': profile_data['notes'],
+            'recommended_action': action,
+            'path': report.get('path', ''),
+        }
+        matrix.append(row)
+
+        if readiness in {'missing_config', 'not_installed'}:
+            recommendations.append(f"Install provider config for {provider_name}: {action}")
+        elif readiness == 'drifted':
+            recommendations.append(f"Reconcile drift for {provider_name}: {action}")
+
+    if generation == 'v2':
+        recommendations.append('Project appears to use nbdev v2: use nbdev_prepare / nbdev_export command names.')
+    elif generation == 'v3':
+        recommendations.append('Project appears to use nbdev v3: use nbdev-prepare / nbdev-export command names.')
+
+    if not recommendations:
+        recommendations.append('Provider configs are aligned. Capture a new contract snapshot for CI baseline.')
+
+    ready_count = sum(1 for row in matrix if row['readiness'] == 'ready')
+    rows = [[
+        row['provider'],
+        row['readiness'],
+        'yes' if row['installed'] else 'no',
+        'yes' if row['drifted'] else 'no',
+        row['config_format'],
+        row['recommended_action'],
+    ] for row in matrix]
+    pretty = render_table(
+        'MCP Compatibility Matrix',
+        ['provider', 'readiness', 'installed', 'drifted', 'config', 'recommended_action'],
+        rows,
+    )
+
+    return {
+        'ok': True,
+        'provider': provider,
+        'project': project,
+        'nbdev_generation': generation,
+        'ready_count': ready_count,
+        'total': len(matrix),
+        'matrix': matrix,
+        'recommendations': recommendations,
+        'pretty': pretty,
+    }
+
+
+def mcp_contract_ci_gate(
+    baseline_path: str,
+    current_path: Optional[str] = None,
+    server_name: str = 'mcp.nbdev',
+    allow_additive_tools: bool = True,
+    allow_additive_resources: bool = True,
+    allow_additive_prompts: bool = True,
+) -> Dict[str, Any]:
+    """Tool: Enforce contract-compatibility gate semantics for CI."""
+    diff = mcp_contract_diff(
+        baseline_path=baseline_path,
+        current_path=current_path,
+        server_name=server_name,
+    )
+    if not diff.get('ok'):
+        return diff
+
+    violations: List[str] = []
+    notices: List[str] = []
+
+    removed_tools = diff.get('removed_tools', [])
+    changed_tool_schemas = diff.get('changed_tool_schemas', [])
+    removed_resources = diff.get('removed_resources', [])
+    removed_prompts = diff.get('removed_prompts', [])
+
+    added_tools = diff.get('added_tools', [])
+    added_resources = diff.get('added_resources', [])
+    added_prompts = diff.get('added_prompts', [])
+
+    if removed_tools:
+        violations.append(f"Removed tools are breaking: {', '.join(removed_tools)}")
+    if changed_tool_schemas:
+        violations.append(f"Tool schema changes are breaking: {', '.join(changed_tool_schemas)}")
+    if removed_resources:
+        violations.append(f"Removed resources are breaking: {', '.join(removed_resources)}")
+    if removed_prompts:
+        violations.append(f"Removed prompts are breaking: {', '.join(removed_prompts)}")
+
+    if added_tools and not allow_additive_tools:
+        violations.append(f"Added tools are disallowed in this gate: {', '.join(added_tools)}")
+    elif added_tools:
+        notices.append(f"Additive tools allowed: {', '.join(added_tools)}")
+
+    if added_resources and not allow_additive_resources:
+        violations.append(f"Added resources are disallowed in this gate: {', '.join(added_resources)}")
+    elif added_resources:
+        notices.append(f"Additive resources allowed: {', '.join(added_resources)}")
+
+    if added_prompts and not allow_additive_prompts:
+        violations.append(f"Added prompts are disallowed in this gate: {', '.join(added_prompts)}")
+    elif added_prompts:
+        notices.append(f"Additive prompts allowed: {', '.join(added_prompts)}")
+
+    passed = len(violations) == 0
+    summary = {
+        'breaking': diff.get('breaking', False),
+        'added_tools': len(added_tools),
+        'removed_tools': len(removed_tools),
+        'changed_tool_schemas': len(changed_tool_schemas),
+        'added_resources': len(added_resources),
+        'removed_resources': len(removed_resources),
+        'added_prompts': len(added_prompts),
+        'removed_prompts': len(removed_prompts),
+    }
+
+    result = {
+        'ok': True,
+        'passed': passed,
+        'exit_code': 0 if passed else 1,
+        'violations': violations,
+        'notices': notices,
+        'summary': summary,
+        'diff': diff,
+    }
+    result['pretty'] = render_result('MCP Contract CI Gate', {
+        'passed': passed,
+        'exit_code': result['exit_code'],
+        'violation_count': len(violations),
+        'notice_count': len(notices),
+        'baseline_hash': diff.get('baseline_hash', ''),
+        'current_hash': diff.get('current_hash', ''),
+    })
+    return result
+
+
+def mcp_policy_pack(
+    profile: str = 'balanced',
+    baseline_path: Optional[str] = None,
+    provider: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Tool: Build a governance policy pack for MCP build and release workflows."""
+    profile_name = profile.strip().lower()
+    policy_profiles = {
+        'strict': {
+            'allow_additive_contract': False,
+            'provider_drift_fails': True,
+            'controls': [
+                {
+                    'id': 'auth_visibility',
+                    'level': 'required',
+                    'expectation': 'Require auth for privileged tools and apply visibility boundaries by audience.',
+                },
+                {
+                    'id': 'contract_gate',
+                    'level': 'required',
+                    'expectation': 'Fail CI on any contract drift, including additive tools/resources/prompts.',
+                },
+                {
+                    'id': 'provider_drift',
+                    'level': 'required',
+                    'expectation': 'Fail if provider config is missing or drifted for target clients.',
+                },
+                {
+                    'id': 'duplicate_reasoning',
+                    'level': 'required',
+                    'expectation': 'Require reasoning before dedupe: ABC implementations and backend-specific variants may be valid.',
+                },
+                {
+                    'id': 'dead_code_weighting',
+                    'level': 'required',
+                    'expectation': 'Treat dead-code as weighted signal: lower-level dead exports are higher risk; tutorial usage lowers concern.',
+                },
+                {
+                    'id': 'docs_freshness',
+                    'level': 'required',
+                    'expectation': 'Keep root or agent-scoped living docs current (ROADMAP, TODO, plan files).',
+                },
+                {
+                    'id': 'tutorial_hygiene',
+                    'level': 'required',
+                    'expectation': 'tutorials/ is for runnable notebooks only, not cache/artifacts/outputs.',
+                },
+            ],
+        },
+        'balanced': {
+            'allow_additive_contract': True,
+            'provider_drift_fails': True,
+            'controls': [
+                {
+                    'id': 'auth_visibility',
+                    'level': 'required',
+                    'expectation': 'Use auth/visibility boundaries for write or privileged tools.',
+                },
+                {
+                    'id': 'contract_gate',
+                    'level': 'required',
+                    'expectation': 'Fail CI on removals or schema changes; allow additive surface area.',
+                },
+                {
+                    'id': 'provider_drift',
+                    'level': 'required',
+                    'expectation': 'Fail if provider config is missing or drifted.',
+                },
+                {
+                    'id': 'duplicate_reasoning',
+                    'level': 'recommended',
+                    'expectation': 'Use reasoning before merging similar functions; keep valid backend variants.',
+                },
+                {
+                    'id': 'dead_code_weighting',
+                    'level': 'recommended',
+                    'expectation': 'Dead exports may be public API used in tutorials; prioritize by module hierarchy.',
+                },
+                {
+                    'id': 'docs_freshness',
+                    'level': 'recommended',
+                    'expectation': 'Keep roadmap/changelog/plan docs in sync with behavior changes.',
+                },
+                {
+                    'id': 'tutorial_hygiene',
+                    'level': 'required',
+                    'expectation': 'Store outputs at repo root or ~/Downloads/<repo>, not tutorials/.',
+                },
+            ],
+        },
+        'advisory': {
+            'allow_additive_contract': True,
+            'provider_drift_fails': False,
+            'controls': [
+                {
+                    'id': 'auth_visibility',
+                    'level': 'recommended',
+                    'expectation': 'Prefer auth and visibility filters for non-readonly tools.',
+                },
+                {
+                    'id': 'contract_gate',
+                    'level': 'recommended',
+                    'expectation': 'Run contract gate in CI, but report before enforcing failures.',
+                },
+                {
+                    'id': 'provider_drift',
+                    'level': 'recommended',
+                    'expectation': 'Track provider drift regularly and reconcile before release.',
+                },
+                {
+                    'id': 'duplicate_reasoning',
+                    'level': 'recommended',
+                    'expectation': 'Review duplicate reports with semantic intent before deleting code.',
+                },
+                {
+                    'id': 'dead_code_weighting',
+                    'level': 'recommended',
+                    'expectation': 'Consider tutorial usage before marking exports as dead code.',
+                },
+                {
+                    'id': 'docs_freshness',
+                    'level': 'recommended',
+                    'expectation': 'Keep living docs current when implementation or workflows change.',
+                },
+                {
+                    'id': 'tutorial_hygiene',
+                    'level': 'recommended',
+                    'expectation': 'Avoid storing generated artifacts inside tutorials/.',
+                },
+            ],
+        },
+    }
+
+    if profile_name not in policy_profiles:
+        valid = ', '.join(sorted(policy_profiles.keys()))
+        return {'ok': False, 'error': f'Unknown profile: {profile}. Valid: {valid}'}
+
+    selected = policy_profiles[profile_name]
+    checks: Dict[str, Any] = {}
+    violations: List[str] = []
+    warnings: List[str] = []
+
+    if baseline_path:
+        gate = mcp_contract_ci_gate(
+            baseline_path=baseline_path,
+            allow_additive_tools=selected['allow_additive_contract'],
+            allow_additive_resources=selected['allow_additive_contract'],
+            allow_additive_prompts=selected['allow_additive_contract'],
+        )
+        checks['contract_gate'] = {
+            'ok': gate.get('ok', False),
+            'passed': gate.get('passed', False),
+            'exit_code': gate.get('exit_code', 1),
+            'violation_count': len(gate.get('violations', [])) if gate.get('ok') else None,
+        }
+        if gate.get('ok') and not gate.get('passed', False):
+            violations.extend(gate.get('violations', []))
+        elif not gate.get('ok'):
+            violations.append(f"Contract gate check failed to run: {gate.get('error', 'unknown error')}")
+    else:
+        checks['contract_gate'] = {
+            'ok': True,
+            'passed': None,
+            'exit_code': None,
+            'violation_count': None,
+            'note': 'Skipped (no baseline_path provided).',
+        }
+
+    drift = mcp_provider_drift_report(provider=provider)
+    if drift.get('ok'):
+        drifted_count = drift.get('drifted_count', 0)
+        checks['provider_drift'] = {
+            'ok': True,
+            'drifted_count': drifted_count,
+            'providers_checked': len(drift.get('providers', [])),
+        }
+        if drifted_count > 0:
+            if selected['provider_drift_fails']:
+                violations.append(f"Provider drift detected for {drifted_count} provider(s).")
+            else:
+                warnings.append(f"Provider drift detected for {drifted_count} provider(s).")
+    else:
+        checks['provider_drift'] = {'ok': False, 'error': drift.get('error', 'unknown error')}
+        if selected['provider_drift_fails']:
+            violations.append(f"Provider drift check failed: {drift.get('error', 'unknown error')}")
+        else:
+            warnings.append(f"Provider drift check failed: {drift.get('error', 'unknown error')}")
+
+    passed = len(violations) == 0
+    result = {
+        'ok': True,
+        'profile': profile_name,
+        'controls': selected['controls'],
+        'checks': checks,
+        'passed': passed,
+        'violations': violations,
+        'warnings': warnings,
+        'next_steps': [
+            'Run mcp_compatibility_matrix to validate provider readiness.',
+            'Gate releases with mcp_contract_ci_gate and a committed baseline contract.',
+            'Treat duplicate/dead-code reports as review signals, not automatic deletions.',
+        ],
+    }
+    result['pretty'] = render_result('MCP Policy Pack', {
+        'profile': profile_name,
+        'passed': passed,
+        'control_count': len(selected['controls']),
+        'violation_count': len(violations),
+        'warning_count': len(warnings),
+    })
+    return result
+
+
+# %% ../../nbs/11_tools/01_project.ipynb 22
 # Tool annotation definitions for project tools
 TOOL_ANNOTATIONS = {
     'set_project': ToolAnnotations(
@@ -1075,6 +1507,24 @@ TOOL_ANNOTATIONS = {
         idempotentHint=True,
         openWorldHint=False
     ),
+    'mcp_compatibility_matrix': ToolAnnotations(
+        title="MCP Compatibility Matrix",
+        readOnlyHint=True,
+        idempotentHint=True,
+        openWorldHint=False
+    ),
+    'mcp_contract_ci_gate': ToolAnnotations(
+        title="MCP Contract CI Gate",
+        readOnlyHint=True,
+        idempotentHint=True,
+        openWorldHint=False
+    ),
+    'mcp_policy_pack': ToolAnnotations(
+        title="MCP Policy Pack",
+        readOnlyHint=True,
+        idempotentHint=True,
+        openWorldHint=False
+    ),
 }
 
 def add_project_tools(mcp: FastMCP) -> None:
@@ -1102,6 +1552,9 @@ def add_project_tools(mcp: FastMCP) -> None:
         ('mcp_contract_diff', mcp_contract_diff),
         ('mcp_provider_drift_report', mcp_provider_drift_report),
         ('mcp_composition_workbench', mcp_composition_workbench),
+        ('mcp_compatibility_matrix', mcp_compatibility_matrix),
+        ('mcp_contract_ci_gate', mcp_contract_ci_gate),
+        ('mcp_policy_pack', mcp_policy_pack),
     ]
 
     for name, func in tools:
@@ -1109,7 +1562,7 @@ def add_project_tools(mcp: FastMCP) -> None:
         mcp.tool(name=name, annotations=annotations)(func)
 
 
-# %% ../../nbs/11_tools/01_project.ipynb 23
+# %% ../../nbs/11_tools/01_project.ipynb 25
 import tempfile
 import shutil
 
@@ -1256,7 +1709,7 @@ def analyze_remote(
             pass
 
 
-# %% ../../nbs/11_tools/01_project.ipynb 24
+# %% ../../nbs/11_tools/01_project.ipynb 26
 import time
 
 # Module-level tracking for server metrics

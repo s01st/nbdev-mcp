@@ -1,5 +1,17 @@
 # Change Log
 
+## 2026-02-16 (Unreleased)
+
+Core functionality changes
+- Added release-governance tooling for MCP contracts and provider readiness checks.
+- Added CI gate semantics for MCP contract diffs with explicit pass/fail exit codes.
+- Added policy-pack generation with explicit guidance for duplicate/dead-code review discipline.
+
+New features
+- New `mcp_compatibility_matrix` tool for provider/client readiness across Codex, Claude, VS Code, and Cursor.
+- New `mcp_contract_ci_gate` tool for CI-friendly contract compatibility enforcement.
+- New `mcp_policy_pack` tool that bundles auth/visibility, contract drift, provider drift, and documentation hygiene controls.
+
 ## 2026-02-06 (Unreleased)
 
 Core functionality changes

@@ -1,6 +1,6 @@
 # nbdev-mcp Refactoring Roadmap
 
-## Status Summary (Updated: 2026-02-06)
+## Status Summary (Updated: 2026-02-16)
 
 | Phase | Status | Tests |
 |-------|--------|-------|
@@ -17,13 +17,19 @@
 - `pytest` ✅ 248 tests pass
 - `nbdev_readme` ⚠️ Known issue with numpydoc parsing (local fastcore)
 
-**Recent Updates (2026-02-06):**
+**Recent Updates (2026-02-16):**
+- Added `mcp_compatibility_matrix` for provider/client readiness planning.
+- Added `mcp_contract_ci_gate` for CI pass/fail contract enforcement.
+- Added `mcp_policy_pack` with strict/balanced/advisory governance profiles.
+- Added coverage in `tests/test_project_tools.py` for new governance tools.
+
+**Prior Updates (2026-02-06):**
 - Weighted dead-code analysis by module depth and tutorial usage.
 - Clarified duplicate-analysis guidance (ABC implementations and name variants).
 - Made duplicate-scan timeouts configurable with timing metadata.
 - Added tests for dead-code weighting and read_notebook_cell truncation.
 
-**Prior Updates (2025-12-22):**
+**Earlier Updates (2025-12-22):**
 - Added complete NumPy-style docstrings to config, resources, and paths modules
 - Default project resolution: MCP now defaults to cwd if it's an nbdev project
 - Fixed `set_current_project()` to sync both config and paths modules
