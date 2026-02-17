@@ -800,14 +800,15 @@ def _run_server(
         return
 
     # Enable test recording hooks only when explicitly requested
-    include_recording_tools = any(
-        os.environ.get(key)
-        for key in (
-            "NBDEV_MCP_ENABLE_RECORDING_TOOLS",
-            "NBDEV_MCP_AUTO_RECORD",
-            "NBDEV_MCP_SESSION_FILE",
-        )
-    )
+    recording_flag_raw = os.environ.get("NBDEV_MCP_ENABLE_RECORDING_TOOLS")
+    auto_record_raw = os.environ.get("NBDEV_MCP_AUTO_RECORD")
+    session_file = os.environ.get("NBDEV_MCP_SESSION_FILE")
+
+    disabled_values = {"", "0", "false", "no", "off"}
+    recording_flag_enabled = bool(recording_flag_raw) and recording_flag_raw.strip().lower() not in disabled_values
+    auto_record_enabled = bool(auto_record_raw) and auto_record_raw.strip().lower() not in disabled_values
+
+    include_recording_tools = recording_flag_enabled or auto_record_enabled or bool(session_file)
 
     # Build MCP
     mcp = create_nbdev_mcp(
@@ -816,13 +817,12 @@ def _run_server(
     )
 
     # Auto-recording for agent tests
-    if os.environ.get("NBDEV_MCP_AUTO_RECORD"):
+    if auto_record_enabled:
         from nbdev_mcp.tests.agent_e2e import start_recording
         start_recording()
         log.info("Auto-recording enabled via NBDEV_MCP_AUTO_RECORD")
 
     # Register shutdown handler to save session
-    session_file = os.environ.get("NBDEV_MCP_SESSION_FILE")
     if session_file:
         import atexit
         def save_session_on_exit():
