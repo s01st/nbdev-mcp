@@ -187,6 +187,25 @@ class TestListTools:
         for tool in tools:
             assert tool.description, f"Tool {tool.name} missing description"
 
+    async def test_recording_tools_disabled_by_default(self, mcp_server):
+        """Recording tools should not be registered unless explicitly enabled."""
+        tools = await mcp_server.list_tools()
+        tool_names = {t.name for t in tools}
+        assert "start_session_recording" not in tool_names
+        assert "stop_session_recording" not in tool_names
+        assert "get_recording_status" not in tool_names
+        assert "validate_session" not in tool_names
+
+    async def test_recording_tools_enabled_when_opted_in(self):
+        """Recording tools should be available when include_recording_tools=True."""
+        mcp = create_nbdev_mcp(include_recording_tools=True)
+        tools = await mcp.list_tools()
+        tool_names = {t.name for t in tools}
+        assert "start_session_recording" in tool_names
+        assert "stop_session_recording" in tool_names
+        assert "get_recording_status" in tool_names
+        assert "validate_session" in tool_names
+
 
 # =============================================================================
 # Resource Listing Tests

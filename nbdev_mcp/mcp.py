@@ -35,16 +35,14 @@ from nbdev_mcp.utils.paths import (
 from .utils.subprocess import watch_notebooks
 from .resources import add_resources
 from nbdev_mcp.tools import (
-    add_project_tools, add_env_tools, add_nbdev_tools, 
-    add_notebook_editing_tools, add_lint_tools, 
+    add_project_tools, add_env_tools, add_nbdev_tools,
+    add_notebook_editing_tools, add_lint_tools,
     add_analysis_tools, add_tests_tools
 )
 from .prompts import add_prompts
 from .tasks import add_task_tools, enable_nbdev_tasks
-from .tests.agent_e2e import add_recording_tools, enable_auto_recording
 
 console = Console();  # semicolon suppresses notebook output
-
 
 # %% auto 0
 __all__ = ['console', 'app', 'set_http_path_if_supported', 'create_nbdev_mcp', 'Transport', 'Provider', 'version_callback',
@@ -84,13 +82,34 @@ def set_http_path_if_supported(target_path: str) -> bool:
             return False
 
 # %% ../nbs/30_mcp.ipynb 8
-def create_nbdev_mcp(name: str = "mcp.nbdev") -> FastMCP:
-    """Create and configure the nbdev MCP server with all resources, tools, and prompts."""
-    mcp = FastMCP(name)
-    
+def create_nbdev_mcp(
+    name: str = "mcp.nbdev",
+    include_recording_tools: bool = False,
+    sdk_log_level: Optional[str] = None,
+) -> FastMCP:
+    """Create and configure the nbdev MCP server with all resources, tools, and prompts.
+
+    Parameters
+    ----------
+    name : str
+        Server name exposed to MCP clients.
+    include_recording_tools : bool
+        If True, register agent recording tools and call tracing hooks.
+        Disabled by default so normal MCP startup avoids test-only instrumentation.
+    sdk_log_level : str | None
+        FastMCP runtime logging level. Defaults to ``NBDEV_MCP_SDK_LOG_LEVEL``
+        and otherwise ``WARNING`` for quiet stdio startup.
+    """
+    allowed_log_levels = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
+    effective_log_level = (sdk_log_level or os.environ.get("NBDEV_MCP_SDK_LOG_LEVEL", "WARNING")).upper()
+    if effective_log_level not in allowed_log_levels:
+        effective_log_level = "WARNING"
+
+    mcp = FastMCP(name, log_level=effective_log_level)
+
     # Enable experimental tasks API
     enable_nbdev_tasks(mcp)
-    
+
     # Attach all nbdev-related resources, tools, and prompts
     add_resources(mcp)
     add_project_tools(mcp)
@@ -98,19 +117,20 @@ def create_nbdev_mcp(name: str = "mcp.nbdev") -> FastMCP:
     add_nbdev_tools(mcp)
     add_notebook_editing_tools(mcp)  # CRITICAL: Notebook editing and workflow tools
     add_prompts(mcp)  # Philosophy prompts must come after tools are registered
-    
+
     # Extensions: linting, analysis, and code generation tools
     add_lint_tools(mcp)
     add_analysis_tools(mcp)
     add_tests_tools(mcp)
-    
+
     # Task-based tools for auditing, deduplication, and refactoring
     add_task_tools(mcp)
-    
-    # E2E testing: recording tools for agent behavior analysis
-    add_recording_tools(mcp)
-    enable_auto_recording(mcp)  # Enable automatic recording when recording is active
-    
+
+    if include_recording_tools:
+        from nbdev_mcp.tests.agent_e2e import add_recording_tools, enable_auto_recording
+        add_recording_tools(mcp)
+        enable_auto_recording(mcp)
+
     return mcp
 
 # %% ../nbs/30_mcp.ipynb 10
@@ -779,15 +799,28 @@ def _run_server(
         watch_notebooks(proj_path, interval=watch_interval, on_change=watch_cmd)
         return
 
+    # Enable test recording hooks only when explicitly requested
+    include_recording_tools = any(
+        os.environ.get(key)
+        for key in (
+            "NBDEV_MCP_ENABLE_RECORDING_TOOLS",
+            "NBDEV_MCP_AUTO_RECORD",
+            "NBDEV_MCP_SESSION_FILE",
+        )
+    )
+
     # Build MCP
-    mcp = create_nbdev_mcp()
-    
+    mcp = create_nbdev_mcp(
+        include_recording_tools=include_recording_tools,
+        sdk_log_level="DEBUG" if verbose else None,
+    )
+
     # Auto-recording for agent tests
     if os.environ.get("NBDEV_MCP_AUTO_RECORD"):
         from nbdev_mcp.tests.agent_e2e import start_recording
         start_recording()
         log.info("Auto-recording enabled via NBDEV_MCP_AUTO_RECORD")
-    
+
     # Register shutdown handler to save session
     session_file = os.environ.get("NBDEV_MCP_SESSION_FILE")
     if session_file:
@@ -799,7 +832,7 @@ def _run_server(
                 session.save(Path(session_file))
                 log.info(f"Session saved to {session_file}")
         atexit.register(save_session_on_exit)
-    
+
     match transport:
         case Transport.stdio:
             mcp.run(transport="stdio")
