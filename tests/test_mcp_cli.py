@@ -100,6 +100,7 @@ def _run_server_and_capture_create_kwargs(monkeypatch):
         captured.update(kwargs)
         return dummy
 
+    monkeypatch.setattr(mcp_module, "start_stdio_orphan_watchdog", lambda **_: None)
     monkeypatch.setattr(mcp_module, "create_nbdev_mcp", fake_create_nbdev_mcp)
     mcp_module._run_server(transport=mcp_module.Transport.stdio)
     assert dummy.calls == [{"transport": "stdio"}]
@@ -140,3 +141,103 @@ def test_run_server_session_file_enables_recording_tools(monkeypatch, tmp_path):
 
     captured = _run_server_and_capture_create_kwargs(monkeypatch)
     assert captured["include_recording_tools"] is True
+
+
+def test_should_terminate_stdio_server_respects_grace_period():
+    should_terminate = mcp_module.should_terminate_stdio_server(
+        initial_parent_pid=111,
+        current_parent_pid=1,
+        elapsed_seconds=1.5,
+        grace_seconds=5.0,
+        parent_alive=False,
+    )
+    assert should_terminate is False
+
+
+def test_should_terminate_stdio_server_when_parent_pid_changes_after_grace():
+    should_terminate = mcp_module.should_terminate_stdio_server(
+        initial_parent_pid=111,
+        current_parent_pid=222,
+        elapsed_seconds=7.5,
+        grace_seconds=5.0,
+        parent_alive=True,
+    )
+    assert should_terminate is True
+
+
+def test_should_terminate_stdio_server_when_parent_dead_after_grace():
+    should_terminate = mcp_module.should_terminate_stdio_server(
+        initial_parent_pid=111,
+        current_parent_pid=111,
+        elapsed_seconds=7.5,
+        grace_seconds=5.0,
+        parent_alive=False,
+    )
+    assert should_terminate is True
+
+
+def test_parent_process_alive_handles_missing_and_permission(monkeypatch):
+    def missing_pid(pid, sig):
+        raise ProcessLookupError("missing")
+
+    monkeypatch.setattr(mcp_module.os, "kill", missing_pid)
+    assert mcp_module.parent_process_alive(12345) is False
+
+    def no_permission(pid, sig):
+        raise PermissionError("denied")
+
+    monkeypatch.setattr(mcp_module.os, "kill", no_permission)
+    assert mcp_module.parent_process_alive(12345) is True
+
+
+def test_run_server_starts_watchdog_for_stdio(monkeypatch):
+    dummy = _DummyMCP()
+    started: list[dict] = []
+
+    monkeypatch.delenv("NBDEV_MCP_DISABLE_STDIO_WATCHDOG", raising=False)
+    monkeypatch.setattr(mcp_module, "create_nbdev_mcp", lambda **_: dummy)
+    monkeypatch.setattr(
+        mcp_module,
+        "start_stdio_orphan_watchdog",
+        lambda **kwargs: started.append(kwargs),
+    )
+
+    mcp_module._run_server(transport=mcp_module.Transport.stdio)
+
+    assert dummy.calls == [{"transport": "stdio"}]
+    assert len(started) == 1
+
+
+def test_run_server_does_not_start_watchdog_for_streamable_http(monkeypatch):
+    dummy = _DummyMCP()
+    started: list[dict] = []
+
+    monkeypatch.setattr(mcp_module, "create_nbdev_mcp", lambda **_: dummy)
+    monkeypatch.setattr(
+        mcp_module,
+        "start_stdio_orphan_watchdog",
+        lambda **kwargs: started.append(kwargs),
+    )
+
+    mcp_module._run_server(transport=mcp_module.Transport.streamable_http)
+
+    assert dummy.calls == [{"transport": "streamable-http"}]
+    assert started == []
+
+
+def test_run_server_watchdog_can_be_disabled(monkeypatch):
+    dummy = _DummyMCP()
+    started: list[dict] = []
+
+    monkeypatch.setenv("NBDEV_MCP_DISABLE_STDIO_WATCHDOG", "1")
+    monkeypatch.setattr(mcp_module, "create_nbdev_mcp", lambda **_: dummy)
+    monkeypatch.setattr(
+        mcp_module,
+        "start_stdio_orphan_watchdog",
+        lambda **kwargs: started.append(kwargs),
+    )
+
+    mcp_module._run_server(transport=mcp_module.Transport.stdio)
+
+    assert dummy.calls == [{"transport": "stdio"}]
+    assert started == []

@@ -7,7 +7,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional, Annotated
 from enum import Enum
 
-import os, sys, json
+import os, sys, json, threading, time
 from pathlib import Path
 
 import typer
@@ -53,8 +53,8 @@ __all__ = ['console', 'app', 'set_http_path_if_supported', 'create_nbdev_mcp', '
            'install_wrapper_script', 'parse_jsonc', 'parse_toml', 'render_diff', 'make_backup', 'write_text_config',
            'reconcile_server_config', 'toml_value', 'render_codex_toml_block', 'upsert_toml_table', 'remove_toml_table',
            'enable_mcp_autostart_in_settings', 'update_provider_config', 'install_to_provider',
-           'uninstall_from_provider', 'check_provider_status', 'run', 'install', 'update', 'uninstall', 'status',
-           'test', 'main']
+           'uninstall_from_provider', 'check_provider_status', 'parent_process_alive', 'should_terminate_stdio_server',
+           'start_stdio_orphan_watchdog', 'run', 'install', 'update', 'uninstall', 'status', 'test', 'main']
 
 # %% ../nbs/30_mcp.ipynb 6
 def set_http_path_if_supported(target_path: str) -> bool:
@@ -760,6 +760,78 @@ def check_provider_status(provider: Provider) -> dict:
 
 
 # %% ../nbs/30_mcp.ipynb 17
+def parent_process_alive(parent_pid: int) -> bool:
+    """Return True when a parent PID appears alive."""
+    if parent_pid <= 0:
+        return False
+    try:
+        os.kill(parent_pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+
+
+def should_terminate_stdio_server(
+    initial_parent_pid: int,
+    current_parent_pid: int,
+    elapsed_seconds: float,
+    grace_seconds: float,
+    parent_alive: bool,
+) -> bool:
+    """Return True when stdio server should exit due to parent loss."""
+    if elapsed_seconds < grace_seconds:
+        return False
+    if current_parent_pid in (0, 1):
+        return True
+    if current_parent_pid != initial_parent_pid:
+        return True
+    if not parent_alive:
+        return True
+    return False
+
+
+def start_stdio_orphan_watchdog(
+    check_interval: float = 2.0,
+    grace_seconds: float = 8.0,
+) -> threading.Thread:
+    """Start a daemon watchdog that exits orphaned stdio server processes."""
+    initial_parent_pid = os.getppid()
+    check_interval = max(0.2, float(check_interval))
+    grace_seconds = max(0.0, float(grace_seconds))
+    started = time.monotonic()
+
+    def monitor() -> None:
+        while True:
+            elapsed_seconds = time.monotonic() - started
+            current_parent_pid = os.getppid()
+            parent_alive = parent_process_alive(initial_parent_pid)
+            if should_terminate_stdio_server(
+                initial_parent_pid=initial_parent_pid,
+                current_parent_pid=current_parent_pid,
+                elapsed_seconds=elapsed_seconds,
+                grace_seconds=grace_seconds,
+                parent_alive=parent_alive,
+            ):
+                log.warning(
+                    "Stdio parent process unavailable; exiting orphaned server "
+                    f"(initial_ppid={initial_parent_pid}, current_ppid={current_parent_pid})"
+                )
+                os._exit(0)
+            time.sleep(check_interval)
+
+    thread = threading.Thread(
+        target=monitor,
+        name='nbdev-mcp-stdio-watchdog',
+        daemon=True,
+    )
+    thread.start()
+    return thread
+
+
 def _run_server(
     project: Optional[str] = None,
     transport: Transport = Transport.stdio,
@@ -833,8 +905,27 @@ def _run_server(
                 log.info(f"Session saved to {session_file}")
         atexit.register(save_session_on_exit)
 
+    watchdog_disable_raw = os.environ.get("NBDEV_MCP_DISABLE_STDIO_WATCHDOG", "")
+    watchdog_disabled = bool(watchdog_disable_raw) and watchdog_disable_raw.strip().lower() not in disabled_values
+
+    watchdog_interval_raw = os.environ.get("NBDEV_MCP_STDIO_WATCHDOG_INTERVAL", "2.0")
+    watchdog_grace_raw = os.environ.get("NBDEV_MCP_STDIO_WATCHDOG_GRACE", "8.0")
+    try:
+        watchdog_interval = float(watchdog_interval_raw)
+    except (TypeError, ValueError):
+        watchdog_interval = 2.0
+    try:
+        watchdog_grace = float(watchdog_grace_raw)
+    except (TypeError, ValueError):
+        watchdog_grace = 8.0
+
     match transport:
         case Transport.stdio:
+            if not watchdog_disabled:
+                start_stdio_orphan_watchdog(
+                    check_interval=watchdog_interval,
+                    grace_seconds=watchdog_grace,
+                )
             mcp.run(transport="stdio")
         case Transport.streamable_http | Transport.http:
             default = (host == "127.0.0.1" and port == 8000 and path == "/mcp")
