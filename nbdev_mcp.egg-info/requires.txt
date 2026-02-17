@@ -1,0 +1,10 @@
+mcp
+requests
+rich
+typer
+nbformat
+
+[dev]
+nbdev
+pytest
+pytest-asyncio

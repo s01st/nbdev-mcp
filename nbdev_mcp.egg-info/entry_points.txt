@@ -1,0 +1,5 @@
+[console_scripts]
+nbdev-mcp = nbdev_mcp.mcp:main
+
+[nbdev]
+nbdev_mcp = nbdev_mcp._modidx:d
