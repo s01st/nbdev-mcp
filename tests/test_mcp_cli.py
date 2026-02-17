@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import nbdev_mcp.mcp as mcp_module
 
 
@@ -72,3 +74,11 @@ def test_callback_skips_run_when_subcommand_present(monkeypatch):
     )
 
     assert called["value"] is False
+
+
+def test_legacy_script_wrapper_exists_and_calls_main():
+    """Legacy scripts/mcp.nbdev.py should remain a thin wrapper."""
+    script_path = Path(__file__).resolve().parent.parent / "scripts" / "mcp.nbdev.py"
+    text = script_path.read_text(encoding="utf-8")
+    assert "from nbdev_mcp.mcp import main" in text
+    assert "main()" in text

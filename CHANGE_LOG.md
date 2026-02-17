@@ -17,7 +17,7 @@ New features
 - Added safe repo markdown resources: `nbdev://repo-markdown` plus template `nbdev://repo-markdown/{doc_key}`.
 - Added resource safety guards and coverage for traversal prevention, suffix filtering, and truncation behavior.
 - Added CLI transport parity in default mode (`nbdev-mcp --transport ... --host ... --port ... --path ...`).
-- Removed reference scripts under `scripts/` (`mcp.nbdev.py`, `mcp.style.py`) now that maintained logic is notebook-first in `nbs/`.
+- Removed `scripts/mcp.style.py` reference script; kept `scripts/mcp.nbdev.py` as a compatibility launcher for existing MCP client configs.
 - Added regression tests for CLI callback forwarding and wrapper behavior.
 
 ## 2026-02-06 (Unreleased)
