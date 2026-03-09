@@ -745,8 +745,11 @@ def notebook_diff(
 
 
 # %% ../../nbs/11_tools/04_editing.ipynb 17
-import subprocess
-import tempfile
+from copy import deepcopy
+
+import nbformat
+from nbclient import NotebookClient
+from nbclient.exceptions import CellExecutionError, CellTimeoutError
 
 def execute_cell(
     project: Optional[str] = None,
@@ -756,7 +759,7 @@ def execute_cell(
 ) -> Dict[str, Any]:
     """Execute a specific cell from a notebook and return its output.
     
-    Uses execnb to execute the cell in isolation. Code cells are executed
+    Uses nbclient to execute the cell in isolation. Code cells are executed
     and their outputs captured. Markdown cells are returned as-is.
     
     Parameters
@@ -783,7 +786,7 @@ def execute_cell(
         - execution_count: int
         - error: str if execution failed
     """
-    from nbdev_mcp.utils.paths import nbs_dir, resolve_selector, read_nb, write_nb
+    from nbdev_mcp.utils.paths import nbs_dir, resolve_selector, read_nb
     from nbdev_mcp.utils.nb import join_source
     from nbdev_mcp.utils.config import get_config
     
@@ -828,91 +831,88 @@ def execute_cell(
             'message': 'Markdown cells cannot be executed'
         }
     
-    # Execute the code cell using a subprocess with execnb
-    # Create a temporary notebook with just this cell
+    # Execute isolated one-cell notebook via nbclient.
     try:
-        temp_nb = {
-            'cells': [cell],
+        isolated_cell = deepcopy(cell)
+        raw_source = isolated_cell.get('source', '')
+        if isinstance(raw_source, list):
+            isolated_cell['source'] = ''.join(raw_source)
+        elif raw_source is None:
+            isolated_cell['source'] = ''
+        elif not isinstance(raw_source, str):
+            isolated_cell['source'] = str(raw_source)
+
+        temp_nb = nbformat.from_dict({
+            'cells': [isolated_cell],
             'metadata': data.get('metadata', {}),
             'nbformat': data.get('nbformat', 4),
-            'nbformat_minor': data.get('nbformat_minor', 5)
-        }
-        
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.ipynb', delete=False) as f:
-            import json
-            json.dump(temp_nb, f)
-            temp_path = f.name
-        
-        # Execute using execnb
-        result = subprocess.run(
-            ['python', '-c', f'''
-import json
-from pathlib import Path
-from execnb.nbio import read_nb, write_nb
-from execnb.core import CaptureShell
+            'nbformat_minor': data.get('nbformat_minor', 5),
+        })
 
-nb = read_nb("{temp_path}")
-shell = CaptureShell()
-try:
-    shell.run(nb)
-except Exception as e:
-    nb["cells"][0]["outputs"] = [{{"output_type": "error", "ename": type(e).__name__, "evalue": str(e), "traceback": []}}]
-write_nb(nb, "{temp_path}")
-'''],
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            cwd=str(p)
+        timeout_val = None if (timeout is None or int(timeout) <= 0) else int(timeout)
+        kernel_name = data.get('metadata', {}).get('kernelspec', {}).get('name', 'python3')
+        client = NotebookClient(
+            temp_nb,
+            timeout=timeout_val,
+            kernel_name=kernel_name,
+            allow_errors=False,
+            record_timing=True,
         )
-        
-        # Read back the executed notebook
-        with open(temp_path, 'r') as f:
-            executed_nb = json.load(f)
-        
-        executed_cell = executed_nb['cells'][0]
+
+        try:
+            with client.setup_kernel():
+                client.execute_cell(temp_nb.cells[0], 0)
+        except CellExecutionError:
+            # Keep captured output/error from the executed cell.
+            pass
+
+        executed_cell = temp_nb.cells[0]
         outputs = executed_cell.get('outputs', [])
-        
+
         # Extract stdout/stderr from outputs
         stdout_parts = []
         stderr_parts = []
         for out in outputs:
             if out.get('output_type') == 'stream':
+                text = out.get('text', '')
+                if isinstance(text, list):
+                    text = ''.join(text)
                 if out.get('name') == 'stdout':
-                    stdout_parts.append(out.get('text', ''))
+                    stdout_parts.append(text)
                 elif out.get('name') == 'stderr':
-                    stderr_parts.append(out.get('text', ''))
-        
+                    stderr_parts.append(text)
+
         # Check for errors
         error_output = None
         for out in outputs:
             if out.get('output_type') == 'error':
+                traceback_lines = out.get('traceback', [])
+                if isinstance(traceback_lines, str):
+                    traceback_lines = [traceback_lines]
                 error_output = {
                     'ename': out.get('ename', 'Error'),
                     'evalue': out.get('evalue', ''),
-                    'traceback': out.get('traceback', [])
+                    'traceback': traceback_lines,
                 }
                 break
-        
-        # Clean up
-        Path(temp_path).unlink(missing_ok=True)
-        
+
         return {
             'ok': error_output is None,
             'cell_type': 'code',
             'cell_index': cell_index,
             'source': source,
-            'outputs': outputs,
+            'outputs': list(outputs),
             'stdout': ''.join(stdout_parts),
-            'stderr': ''.join(stderr_parts) + result.stderr,
+            'stderr': ''.join(stderr_parts),
             'execution_count': executed_cell.get('execution_count'),
             'error': error_output
         }
-        
-    except subprocess.TimeoutExpired:
-        Path(temp_path).unlink(missing_ok=True)
+
+    except CellTimeoutError:
         return {'ok': False, 'error': f'Execution timed out after {timeout}s'}
     except Exception as e:
         return {'ok': False, 'error': f'Execution failed: {e}'}
+
 
 # %% ../../nbs/11_tools/04_editing.ipynb 19
 # Tool annotation definitions for notebook editing tools

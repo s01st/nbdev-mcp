@@ -4,7 +4,7 @@ _proc/
 .claude/
 .codex/
 .vscode/
-.pytest_cache/
+/.pytest_cache/
 current_state.md
 
 
@@ -134,9 +134,6 @@ ENV/
 ehthumbs.db
 Thumbs.db
 .idea
-
-# pytest
-.pytest_cache
 
 # tools/trust-doc-nbs
 docs_src/.last_checked
