@@ -24,10 +24,10 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install execnb nbdev quarto
-          pip install -e ".[dev]"
+          pip install -e .
       
       - name: Build docs with nbdev
-        run: nbdev_build_docs
+        run: python -m nbdev.cli build_docs
       
       - uses: quarto-dev/quarto-actions/publish@v2
         with:
