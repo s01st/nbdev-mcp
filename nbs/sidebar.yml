@@ -45,3 +45,4 @@ website:
       - section: tests
         contents:
           - tests/01_agent_e2e.ipynb
+          - tests/02_id_stability.ipynb

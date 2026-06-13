@@ -1,34 +1,47 @@
 name: Deploy to GitHub Pages
 
-permissions:
-  contents: write
-  pages: write
+# Replaces `fastai/workflows/quarto-ghp@master`, which invoked the (now-invalid)
+# `python -m nbdev.cli build_docs` and failed with "unrecognized arguments: build_docs".
+# This uses the canonical GitHub Pages "workflow" flow (matches this repo's
+# Pages build_type=workflow) and nbdev's real `nbdev_docs` build command.
 
 on:
   push:
     branches: ["main", "master"]
   workflow_dispatch:
 
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
 jobs:
-  deploy:
+  build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
-      - name: Set up Python
-        uses: actions/setup-python@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install execnb nbdev quarto
-          pip install -e .
-      
-      - name: Build docs with nbdev
-        run: python -m nbdev.cli build_docs
-      
-      - uses: quarto-dev/quarto-actions/publish@v2
+      - uses: quarto-dev/quarto-actions/setup@v2
+      - name: Install package + dev deps
+        run: pip install -e '.[dev]'
+      - name: Build docs (nbdev_docs -> _docs)
+        run: nbdev_docs
+      - uses: actions/upload-pages-artifact@v3
         with:
-          target: gh-pages
+          path: _docs
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
