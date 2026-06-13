@@ -29,7 +29,10 @@ jobs:
           python-version: '3.12'
       - uses: quarto-dev/quarto-actions/setup@v2
       - name: Install package + dev deps
-        run: pip install -e '.[dev]'
+        # Pin nbdev<3 to match CI (2.4.14): nbdev v3 renames the console script to
+        # `nbdev-docs` (hyphen), so plain install pulled 3.0.17 and `nbdev_docs` was
+        # "command not found".
+        run: pip install -e '.[dev]' 'nbdev<3'
       - name: Build docs (nbdev_docs -> _docs)
         run: nbdev_docs
       - uses: actions/upload-pages-artifact@v3
